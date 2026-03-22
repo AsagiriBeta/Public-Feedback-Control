@@ -57,9 +57,7 @@ handles.output = hObject;
 % Update handles structure
 guidata(hObject, handles);
 addpath(pwd)
-addpath('picosdk-ps5000a-matlab-instrument-driver-master\picosdk-ps5000a-matlab-instrument-driver-master');
-addpath('picotech-picosdk-matlab-picoscope-support-toolbox-v1.0-12-g7e73524\picotech-picosdk-matlab-picoscope-support-toolbox-7e73524');
-addpath('picotech-picosdk-ps5000a-matlab-instrument-driver-4d3f059');
+addpath(fullfile(pwd, 'rigol'));
 
 % --- Outputs from this function are returned to the command line.
 function varargout = MatlabScript_FeedbackControl_OutputFcn(hObject, eventdata, handles)
@@ -474,43 +472,31 @@ volt    = str2num(get(handles.voltage,'String'));      % voltage [mVppk]
 offset  = 0;
 depth = str2num(get(handles.sampleNum,'String'));      % Sampling frequency * pulse length
 Vstep = 1;                                             % Step size for voltage ramp
-SC_range = 56373:56876;                                % Frequency index of third harmonic
-IC_range = (9187:9690);                                % Frequency index of sub-harmonic
-
-
 %% Directory for saving data
 directory= get(handles.directory,'String');
-if directory(length(directory)) ~= '\'
-    directory(length(directory)+1) = '\';
+if ~endsWith(directory, filesep)
+    directory = [directory filesep];
 end
 filename = ['PCDcontrol_',get(handles.studyID,'String')];
 
 
-%% Pico initialization
-PS5000aConfig;
-assignin('base','ps5000aConfigInfo',ps5000aConfigInfo);
-assignin('base','ps5000aEnuminfo',ps5000aEnuminfo);
-assignin('base','ps5000aMethodinfo',ps5000aMethodinfo);
-assignin('base','ps5000aStructs',ps5000aStructs);
-assignin('base','ps5000aThunkLibName',ps5000aThunkLibName);
-
-ps5000aDeviceObj = Pico_initialize;
-[status.setChB]=invoke(ps5000aDeviceObj,'ps5000aSetChannel',1,0,1,8,0.0); % Turn off channel B
-blockGroupObj = get(ps5000aDeviceObj, 'Block');
-blockGroupObj = blockGroupObj(1);
-
-Timebase = 1/Fs * 125e6+ 2; % Reverse formula to calculate timebase inside picoscope --> For further info, please refer to https://www.picotech.com/downloads
-set(ps5000aDeviceObj, 'timebase', Timebase);
-[status.getTimebase, timeIntervalNanoSeconds, maxSamples] = invoke(ps5000aDeviceObj, 'ps5000aGetTimebase', Timebase, 0);
-
-set(ps5000aDeviceObj, 'numPreTriggerSamples', offset);
-set(ps5000aDeviceObj, 'numPostTriggerSamples', depth);
-
+%% RIGOL DHO814：USB-VISA 采集（替代 PicoScope PS5000A）
+cfg = rigol_instr_config();
+scope = rigol_dho814_open();
+info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel);
+timeIntervalNanoSeconds = info.timeIntervalNanoSeconds;
 
 %% data acquisition and FFT setup
-realFs = 1/(double(timeIntervalNanoSeconds)*1e-9);             % Sampling Frequency of picoscope
+realFs = info.realFs;
 NFFT =2^nextpow2(depth);
 F = realFs.*(0:(NFFT/2))/NFFT;
+freq_hz = freq * 1e6;
+if cfg.use_legacy_fft_bins
+    SC_range = cfg.legacy_SC_range;
+    IC_range = cfg.legacy_IC_range;
+else
+    [SC_range, IC_range] = rigol_fft_harmonic_bands(freq_hz, realFs, NFFT, cfg.harmonic_bandwidth_hz);
+end
 
 cd(directory)
 
@@ -536,16 +522,14 @@ Vplotax = gca;
 
 %% Initialize Fgen and Start data acquisition
 fgen_excute_UTSW(freq,volt,0,cycle,1/PRF);
-fprintf(fgen,'OUTPut ON');
+rigol_dg2052_output_set(fgen, true);
 SonicationTimeLeft  = SonicationDuration;
 SonicationStart = tic;
 
 
 while  SonicationTimeLeft > 0
     
-    % Block acquisition of picoscope
-    [runBlock] = invoke(blockGroupObj, 'runBlock', 0);
-    [numSamples, overflow, chA, ~] = invoke(blockGroupObj, 'getBlockData', 0, 0, 1, 0);
+    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
     datamat(pulse,:) = chA; 
     
     % Plot realtime signal and FFT result
@@ -570,7 +554,7 @@ while  SonicationTimeLeft > 0
     Vbaselinerealtime(pulse) = volt;  
     RampSC_baseline(pulse) = sum(Y(SC_range));
     RampIC_baseline(pulse) = sum(Y(IC_range));
-    fprintf(fgen, sprintf('VOLTage %3g mVPP', volt));
+    rigol_dg2052_set_vpp_mV(fgen, volt);
     
     %% Plot realtime SC, IC, V
     hold(SCplotax,'on')
@@ -602,15 +586,13 @@ while  SonicationTimeLeft > 0
     %% Time remaining
     SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))
     if SonicationTimeLeft<=0
-        fprintf(fgen,'OUTPut OFF');
+        rigol_dg2052_output_set(fgen, false);
     end
 end
 
 guidata(hObject, handles);
 
-[stopBlock] = invoke(ps5000aDeviceObj, 'ps5000astop');
-disconnect(ps5000aDeviceObj);
-delete(ps5000aDeviceObj);
+clear scope
 % Set times for saving file name
 date_format = 'yyyy-mm-dd';
 date_string = datestr(now, date_format);
@@ -643,8 +625,6 @@ volt    = str2num(get(handles.voltage,'String'));                    % voltage [
 offset  = 0;
 depth = str2num(get(handles.sampleNum,'String'));                    % Data acquisition length [points]
 Vstep = 1;                                                           % Step size for voltage ramp
-SC_range = 56373:56876;                                              % Frequency index of third harmonic
-IC_range = (9187:9690);                                              % Frequency index of sub-harmonic
 RampSC=0;
 
 TGT = str2num(get(handles.ControllerTarget,'String'));               % Target cavitation level
@@ -652,29 +632,26 @@ VrampFlag = true;
 maxInputV = str2num(get(handles.MaxV,'String'));                     % Max Input voltage for safety
 
 % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% Pico initialization
-ps5000aDeviceObj = Pico_initialize;
-
-[status.setChB]=invoke(ps5000aDeviceObj,'ps5000aSetChannel',1,0,1,8,0.0); % Turn off channel B
-blockGroupObj = get(ps5000aDeviceObj, 'Block');
-blockGroupObj = blockGroupObj(1);
-
-Timebase = 1/Fs * 125e6+ 2;  % Reverse formula to calculate timebase inside picoscope
-set(ps5000aDeviceObj, 'timebase', Timebase);
-[status.getTimebase, timeIntervalNanoSeconds, maxSamples] = invoke(ps5000aDeviceObj, 'ps5000aGetTimebase', Timebase, 0);
-
-
-set(ps5000aDeviceObj, 'numPreTriggerSamples', offset);
-set(ps5000aDeviceObj, 'numPostTriggerSamples', depth);
-
+%% RIGOL DHO814（USB-VISA）
+cfg = rigol_instr_config();
+scope = rigol_dho814_open();
+info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel);
+timeIntervalNanoSeconds = info.timeIntervalNanoSeconds;
 
 %% data acquisition and FFT setup
-realFs = 1/(double(timeIntervalNanoSeconds)*1e-9);             % Sampling Frequency for picoscope
+realFs = info.realFs;
 NFFT =2^nextpow2(depth);
 F = realFs*(0:(NFFT/2))/NFFT;
+freq_hz = freq * 1e6;
+if cfg.use_legacy_fft_bins
+    SC_range = cfg.legacy_SC_range;
+    IC_range = cfg.legacy_IC_range;
+else
+    [SC_range, IC_range] = rigol_fft_harmonic_bands(freq_hz, realFs, NFFT, cfg.harmonic_bandwidth_hz);
+end
 filename=get(handles.directory,'string');
-if filename(length(filename)) ~= '\'
-    filename(length(filename)+1) = '\';
+if ~endsWith(filename, filesep)
+    filename = [filename filesep];
 end
 studyIDName = get(handles.studyID,'String');
 
@@ -710,12 +687,11 @@ FUSonFlag = true;
 firstFUSon=1;
 while  SonicationTimeLeft > 0
     if (toc(SonicationStart)>=MBLoadTime)&&(FUSonFlag)
-        fprintf(fgen,'OUTPut ON');
+        rigol_dg2052_output_set(fgen, true);
         FUSonFlag=false;
         firstFUSon = pulse;
     end
-    [runBlock] = invoke(blockGroupObj, 'runBlock', 0);
-    [numSamples, overflow, chA, ~] = invoke(blockGroupObj, 'getBlockData', 0, 0, 1, 0);
+    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
     datamat(pulse,:) = chA;
     
     set(handles.PulseNum,'String',['Baseline acquisition: pulse #',num2str(pulse)]);
@@ -767,7 +743,7 @@ while  SonicationTimeLeft > 0
     % Time remaining
     SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))
     if SonicationTimeLeft<=0
-        fprintf(fgen,'OUTPut OFF');
+        rigol_dg2052_output_set(fgen, false);
     end
 end
 stdSC_baseline = std(tempSC_baseline(firstFUSon:end));
@@ -779,15 +755,14 @@ SCdesired = 10^(log10(RampSC_baseline*(10^(TGT/10))));
 
 %% Start treatment acquisition
 fgen_excute_UTSW(freq,volt,0,cycle,1/PRF);
-fprintf(fgen,'OUTPut ON');
+rigol_dg2052_output_set(fgen, true);
 SonicationStart = tic;
 SonicationDuration = str2num(get(handles.duration,'String'));        % total time for sonication [s]
 SonicationTimeLeft  = SonicationDuration;
 sumRampSC = 0;
 while  (SonicationTimeLeft > 0)
 
-    [runBlock] = invoke(blockGroupObj, 'runBlock', 0);
-    [numSamples, overflow, chA, ~] = invoke(blockGroupObj, 'getBlockData', 0, 0, 1, 0);
+    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
     datamat(pulse,:) = chA;
     
     set(handles.PulseNum,'String',['During MB injection; pulse #',num2str(pulse)]);
@@ -841,7 +816,7 @@ while  (SonicationTimeLeft > 0)
             if volt>maxInputV, volt = maxInputV; end
         end
     end
-    fprintf(fgen, sprintf('VOLTage %3g mVPP', volt));
+    rigol_dg2052_set_vpp_mV(fgen, volt);
     
     %% Plot realtime SC, IC, V
     hold(SCplotax,'on')
@@ -871,14 +846,12 @@ while  (SonicationTimeLeft > 0)
     SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))%(SonicationDuration - toc)/60;
     TimeRecord(pulse) = SonicationTimeLeft;
     if (SonicationTimeLeft<=0)
-        fprintf(fgen,'OUTPut OFF');
+        rigol_dg2052_output_set(fgen, false);
     end
     pulse = pulse + 1;
 end
 
-[stopBlock] = invoke(ps5000aDeviceObj, 'ps5000astop');
-disconnect(ps5000aDeviceObj);
-delete(ps5000aDeviceObj);
+clear scope
 save([filename studyIDName '.mat']);
 clear datamat Vrealtime RampSC RampIC TimeRecord
 
@@ -937,7 +910,12 @@ function stop_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 global fgen
-fprintf(fgen,'OUTPut OFF');
+try
+    if ~isempty(fgen)
+        rigol_dg2052_output_set(fgen, false);
+    end
+catch
+end
 
 
 
