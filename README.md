@@ -40,11 +40,22 @@ Chien 等, *Blood-Brain Barrier Opening by Individualized Closed-Loop Feedback C
 - `harmonic_bandwidth_hz`：由基频自动划分 FFT 谐波带时的带宽（默认 200 kHz）。
 - `use_legacy_fft_bins`：若为 `true`，则使用原仓库中针对 Picoscope 固定采样配置的硬编码索引（仅在与旧数据严格对比时使用；若 NFFT 与采样率不一致可能导致越界）。
 
+## DG2052 连接自检
+
+填好 `rigol_instr_config.m` 中的 `awg_visa` 后，可在 MATLAB 中运行：
+
+```matlab
+run('rigol/test_dg2052_connection.m')
+```
+
+脚本会查询 `*IDN?`、写入 1 kHz / 20 mVpp 连续正弦并回读频率与幅度，再调用与主界面相同的 `rigol_dg2052_apply_burst` 做一次猝发配置。默认**不打开**前面板射频输出；若需验证实际输出，将脚本内 `enable_output_pulse` 改为 `true`（务必确认下游功放/换能器与负载安全）。
+
 ## 使用顺序建议
 
 1. 连接 USB，确认 `visadevlist` 中两台仪器均出现。
-2. 在 GUI 中点击 **IniFgen**（或等价回调），初始化全局 `fgen` 与 DG2052 猝发参数。
-3. 按原流程进行 **PCDcontrol** / **Sonication**；采集由 DHO814 单次触发 + RAW 波形读取完成。
+2. （建议）运行 `rigol/test_dg2052_connection.m` 确认 DG2052 程控正常。
+3. 在 GUI 中点击 **IniFgen**（或等价回调），初始化全局 `fgen` 与 DG2052 猝发参数。
+4. 按原流程进行 **PCDcontrol** / **Sonication**；采集由 DHO814 单次触发 + RAW 波形读取完成。
 
 ## 触发与垂直刻度
 
