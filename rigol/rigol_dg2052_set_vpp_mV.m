@@ -4,5 +4,6 @@ cfg = rigol_instr_config();
 ch = cfg.awg_channel;
 src = sprintf('SOURce%d', ch);
 vpp = ampl_mVpp / 1000;
+writeline(dev, sprintf(':%s:VOLTage:UNIT VPP', src));
 writeline(dev, sprintf(':%s:VOLTage %.12g', src, vpp));
 end

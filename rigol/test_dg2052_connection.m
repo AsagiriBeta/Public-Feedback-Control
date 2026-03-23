@@ -53,7 +53,7 @@ writeline(dev, sprintf(':%s:VOLTage:UNIT VPP', src));
 writeline(dev, sprintf(':%s:VOLTage 0.02', src));
 writeline(dev, sprintf(':%s:BURSt:STATe OFF', src));
 writeline(dev, sprintf(':%s:PHASe 0', src));
-writeline(dev, [':' outTag ':LOAD INF']);
+writeline(dev, [':' outTag ':LOAD INFinity']);
 
 writeline(dev, sprintf(':%s:FREQuency?', src));
 f_rd = str2double(strtrim(char(readline(dev))));

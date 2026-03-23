@@ -13,12 +13,12 @@ Chien 等, *Blood-Brain Barrier Opening by Individualized Closed-Loop Feedback C
 | 通信 | Pico SDK | **MATLAB Instrument Control Toolbox**，`visadev` 访问 VISA 资源字符串 |
 
 示波器 SCPI 依据 **RIGOL《DHO800/DHO900 Programming Guide》**（与 DHO814 同一命令体系）：波形读取流程为 `:STOP` → `:WAVeform:MODE RAW` → `:WAVeform:DATA?` 等（手册 3.28 节）。  
-信号源命令依据 **DG2000 系列编程手册 / 用户手册**中的 `:SOURce<n>:`、`:BURSt:`、`:OUTPut<n>:` 子系统；不同固件若对 `BURSt:INTernal:PERiod` 命名有差异，可在 `rigol_dg2052_apply_burst.m` 中对照手册调整。
+信号源命令依据 **DG2000 编程手册**中的 `:SOURce<n>:`、`:BURSt:`、`:OUTPut<n>:` 子系统；猝发参数在 `BURSt:STATe ON` 之前写完（与手册建议一致），周期使用 `BURSt:INTernal:PERiod`。
 
 官方资料入口（下载编程指南与用户手册）：
 
-- [RIGOL DHO800 产品页 / 手册下载](https://www.rigol.com/products/detail/DHO814)
-- [RIGOL DG2000 / DG2052 产品页](https://www.rigol.com/products/detail/DG2052)
+- [RIGOL DHO800 产品页 / 手册下载](https://www.rigol.com/zh_CN/products/oscilloscope/DHO800.html)
+- [RIGOL DG2000 / DG2052 产品页](https://www.rigol.com/zh_CN/products/function-arbitrary-waveform-generator/DG2000.html)
 
 ## 环境要求
 
