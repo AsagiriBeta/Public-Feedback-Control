@@ -1,57 +1,189 @@
-name: build
+# 自动版本号、自动打 tag、自动构建、自动发布 Release。
+# 仅 main 推送与手动触发，避免 PR / 其它分支消耗额度。
+# macOS / Windows onedir zip（与 DG2000-Trigger 相同，不打 .app / 不打 Linux）。
+name: Build and Release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
-  workflow_dispatch:
   push:
-    tags:
-      - "v*"
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: "Version bump type"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   test:
+    if: github.actor != 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pytest
+          python -m pip install -U pip
+          python -m pip install ".[dev]"
       - name: Test
         run: pytest
 
-  package:
+  version:
     needs: test
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Bump version and tag
+        id: bump
+        env:
+          RELEASE_TYPE: ${{ github.event.inputs.release_type || 'patch' }}
+        run: |
+          python - <<'PY'
+          import pathlib
+          import re
+          import tomllib
+          import os
+
+          pyproject = pathlib.Path("pyproject.toml")
+          init_py = pathlib.Path("pfc/__init__.py")
+
+          data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+          current = data["project"]["version"]
+          major, minor, patch = map(int, current.split("."))
+
+          release_type = os.environ.get("RELEASE_TYPE", "patch")
+          if release_type == "major":
+              major += 1
+              minor = 0
+              patch = 0
+          elif release_type == "minor":
+              minor += 1
+              patch = 0
+          else:
+              patch += 1
+
+          new_version = f"{major}.{minor}.{patch}"
+          new_tag = f"v{new_version}"
+
+          pyproject_text = pyproject.read_text(encoding="utf-8")
+          pyproject_text = re.sub(
+              r'(?m)^version = "[^"]+"$',
+              f'version = "{new_version}"',
+              pyproject_text,
+              count=1,
+          )
+          pyproject.write_text(pyproject_text, encoding="utf-8")
+
+          init_text = init_py.read_text(encoding="utf-8")
+          init_text = re.sub(
+              r'(?m)^__version__ = "[^"]+"$',
+              f'__version__ = "{new_version}"',
+              init_text,
+          )
+          init_py.write_text(init_text, encoding="utf-8")
+
+          output = pathlib.Path(os.environ["GITHUB_OUTPUT"])
+          with output.open("a", encoding="utf-8") as f:
+              f.write(f"version={new_version}\n")
+              f.write(f"tag={new_tag}\n")
+          PY
+
+      - name: Commit and push version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml pfc/__init__.py
+          git commit -m "chore(release): ${{ steps.bump.outputs.tag }} [skip ci]"
+          git tag "${{ steps.bump.outputs.tag }}"
+          git push origin HEAD:main
+          git push origin "${{ steps.bump.outputs.tag }}"
+
+  package:
+    needs: version
+    permissions:
+      contents: read
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: macos-latest
-            artifact: PFC-macos
-          - os: windows-latest
-            artifact: PFC-windows
-          - os: ubuntu-22.04
-            artifact: PFC-linux
+          - os: macos-14
+            artifact_name: PFC-macos-arm64
+          - os: windows-2022
+            artifact_name: PFC-windows-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.version.outputs.tag }}
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Linux libs
-        if: runner.os == 'Linux'
+          python-version: "3.12"
+
+      - name: Install project + PyInstaller
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libgl1 libegl1 libusb-1.0-0 libxcb-cursor0
-      - name: Install
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          python -m pip install -U pip
+          python -m pip install ".[build]"
+
       - name: Build
-        run: python packaging/build.py
-      - name: Upload
-        uses: actions/upload-artifact@v4
+        run: python -m PyInstaller --noconfirm --clean packaging/pfc.spec
+
+      - name: Zip (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/PFC" -DestinationPath "dist/PFC-${{ needs.version.outputs.tag }}-windows-x64.zip" -Force
+
+      - name: Zip (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "dist/PFC" "dist/PFC-${{ needs.version.outputs.tag }}-macos-arm64.zip"
+
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact }}
-          path: dist/
+          name: ${{ matrix.artifact_name }}-${{ needs.version.outputs.tag }}
+          path: |
+            dist/*.zip
+
+  release:
+    needs: [version, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: PFC-*-${{ needs.version.outputs.tag }}
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: ${{ needs.version.outputs.tag }}
+          generate_release_notes: true
+          files: dist/*.zip

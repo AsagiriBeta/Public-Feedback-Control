@@ -1,64 +1,187 @@
-# -*- mode: python ; coding: utf-8 -*-
-# 参考 DG2000-Trigger：onedir、排除 QtWebEngine 等大模块；本程序仍需 numpy/scipy/matplotlib。
+# PyInstaller：onedir（与 DG2000-Trigger 相同，macOS 不打 .app）。
+# 产物目录使用 ASCII 名 PFC。macOS 保持 upx=False；Windows 可尝试 UPX。
+# GUI 仍需 numpy / matplotlib(qtagg) / scipy.io；其余科学栈与 Qt 模块尽量排除。
+
 import sys
-from pathlib import Path
 
-SPECDIR = Path(SPECPATH)
-ROOT = SPECDIR.parent
+block_cipher = None
 is_win = sys.platform.startswith("win")
-
-hidden = [
-    "pyvisa_py",
-    "pyvisa_py.highlevel",
-    "pyvisa_py.usb",
-    "pyvisa_py.protocols",
-    "usb.backend.libusb1",
-    "matplotlib.backends.backend_qtagg",
-    "scipy.io",
-    "pfc",
-    "pfc.gui.app",
-    "pfc.cli",
-]
 
 excludes = [
     "tkinter",
     "IPython",
     "jupyter",
+    "notebook",
     "pandas",
     "torch",
+    "cv2",
+    "PIL",
+    "Pillow",
     "PyQt5",
     "PyQt6",
+    "pydoc",
+    "unittest",
+    "test",
+    "tests",
+    "matplotlib.tests",
+    "matplotlib.testing",
+    "matplotlib.backends.backend_tkagg",
+    "matplotlib.backends.backend_wxagg",
+    "matplotlib.backends.backend_gtk3agg",
+    "matplotlib.backends.backend_gtk4agg",
+    "matplotlib.backends.backend_macosx",
+    "matplotlib.backends.backend_nbagg",
+    "matplotlib.backends.backend_pdf",
+    "matplotlib.backends.backend_ps",
+    "matplotlib.backends.backend_svg",
+    "mpl_toolkits",
+    "scipy.spatial",
+    "scipy.optimize",
+    "scipy.integrate",
+    "scipy.interpolate",
+    "scipy.signal",
+    "scipy.ndimage",
+    "scipy.cluster",
+    "scipy.stats",
+    "scipy.constants",
+    "scipy.datasets",
+    "scipy.sparse",
+    "scipy.special",
+    "scipy.odr",
+    "scipy.fftpack",
+    "scipy.linalg",
+    "numpy.tests",
+    "numpy.f2py",
+    "numpy.testing",
+    "numpy.distutils",
     "PySide6.QtWebEngineCore",
     "PySide6.QtWebEngineWidgets",
     "PySide6.QtWebEngineQuick",
     "PySide6.Qt3DCore",
     "PySide6.Qt3DRender",
+    "PySide6.Qt3DInput",
+    "PySide6.Qt3DLogic",
+    "PySide6.Qt3DAnimation",
     "PySide6.Qt3DExtras",
+    "PySide6.QtBluetooth",
+    "PySide6.QtNfc",
+    "PySide6.QtPositioning",
+    "PySide6.QtLocation",
+    "PySide6.QtMultimedia",
+    "PySide6.QtMultimediaWidgets",
+    "PySide6.QtPdf",
+    "PySide6.QtPdfWidgets",
+    "PySide6.QtQml",
+    "PySide6.QtQuick",
+    "PySide6.QtQuick3D",
+    "PySide6.QtQuickWidgets",
+    "PySide6.QtRemoteObjects",
+    "PySide6.QtSensors",
+    "PySide6.QtSerialPort",
+    "PySide6.QtSql",
+    "PySide6.QtTest",
+    "PySide6.QtTextToSpeech",
+    "PySide6.QtWebChannel",
+    "PySide6.QtWebSockets",
+    "PySide6.QtXml",
+    "PySide6.QtDesigner",
+    "PySide6.QtHelp",
+    "PySide6.QtHttpServer",
+    "PySide6.QtNetwork",
+    "PySide6.QtNetworkAuth",
+    "PySide6.QtPrintSupport",
+    "PySide6.QtOpenGL",
+    "PySide6.QtOpenGLWidgets",
+    "PySide6.QtCharts",
+    "PySide6.QtDataVisualization",
+    "PySide6.QtGraphs",
+    "PySide6.QtSvg",
+    "PySide6.QtSvgWidgets",
+    "PySide6.QtDBus",
+    "PySide6.QtConcurrent",
 ]
 
-gui = Analysis(
-    [str(ROOT / "pfc" / "__main__.py")],
-    pathex=[str(ROOT)],
+a = Analysis(
+    ["pfc/__main__.py"],
+    pathex=["."],
     binaries=[],
     datas=[],
-    hiddenimports=hidden,
+    hiddenimports=[
+        "pyvisa_py",
+        "pyvisa_py.highlevel",
+        "pyvisa_py.usb",
+        "pyvisa_py.protocols",
+        "usb.backend.libusb1",
+        "matplotlib.backends.backend_qtagg",
+        "scipy.io",
+        "scipy.io.matlab",
+    ],
+    hookspath=[],
+    hooksconfig={
+        "matplotlib": {"backends": ["QtAgg"]},
+    },
+    runtime_hooks=[],
     excludes=excludes,
+    cipher=block_cipher,
     noarchive=False,
 )
 
-cli = Analysis(
-    [str(ROOT / "pfc" / "cli.py")],
-    pathex=[str(ROOT)],
-    binaries=[],
-    datas=[],
-    hiddenimports=hidden,
-    excludes=excludes,
-    noarchive=False,
+_DROP = (
+    "mpl-data/sample_data/",
+    "matplotlib/backends/qt_editor",
+    "numpy/tests/",
+    "numpy/_core/tests/",
+    "scipy/spatial/",
+    "scipy/optimize/",
+    "scipy/integrate/",
+    "scipy/interpolate/",
+    "scipy/signal/",
+    "scipy/ndimage/",
+    "scipy/cluster/",
+    "scipy/stats/",
+    "scipy/sparse/",
+    "scipy/special/",
+    "scipy/linalg/",
+    "scipy/odr/",
+    "scipy/datasets/",
+    "PySide6/translations/",
+    "PySide6/qml/",
+    "QtQuick",
+    "QtQml",
+    "QtMultimedia",
+    "Qt3D",
+    "QtWebEngine",
+    "QtPdf",
+    "QtCharts",
+    "QtDataVisualization",
+    "QtSensors",
+    "QtBluetooth",
+    "QtPositioning",
+    "QtNfc",
+    "QtNetwork",
+    "QtSql",
+    "QtDesigner",
+    "QtSvg",
+    "QtTest",
+    "QtHelp",
+    "QtXml",
 )
 
-gui_exe = EXE(
-    PYZ(gui.pure, gui.zipped_data),
-    gui.scripts,
+
+def _keep(entry) -> bool:
+    name = entry[0] if isinstance(entry, (tuple, list)) else str(entry)
+    n = name.replace("\\", "/")
+    return not any(tok in n for tok in _DROP)
+
+
+a.binaries = [x for x in a.binaries if _keep(x)]
+a.datas = [x for x in a.datas if _keep(x)]
+
+pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
+exe = EXE(
+    pyz,
+    a.scripts,
     [],
     exclude_binaries=True,
     name="PFC",
@@ -67,45 +190,20 @@ gui_exe = EXE(
     strip=False,
     upx=is_win,
     console=False,
-)
-
-cli_exe = EXE(
-    PYZ(cli.pure, cli.zipped_data),
-    cli.scripts,
-    [],
-    exclude_binaries=True,
-    name="PFC-CLI",
-    debug=False,
-    bootloader_ignore_signals=False,
-    strip=False,
-    upx=is_win,
-    console=True,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
 )
 
 coll = COLLECT(
-    gui_exe,
-    gui.binaries,
-    gui.zipfiles,
-    gui.datas,
-    cli_exe,
-    cli.binaries,
-    cli.zipfiles,
-    cli.datas,
-    name="PFC",
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     strip=False,
     upx=is_win,
+    upx_exclude=[],
+    name="PFC",
 )
-
-if sys.platform == "darwin":
-    app = BUNDLE(
-        coll,
-        name="PFC.app",
-        icon=None,
-        bundle_identifier="lab.pfc.feedback",
-        info_plist={
-            "NSHighResolutionCapable": True,
-            "CFBundleName": "PFC",
-            "CFBundleDisplayName": "PFC 闭环控制",
-            "CFBundleShortVersionString": "1.1.0",
-        },
-    )

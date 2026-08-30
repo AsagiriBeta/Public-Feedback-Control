@@ -19,8 +19,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-usb = []
-dev = ["pytest>=8.0", "pyinstaller>=6.6"]
+dev = ["pytest>=8.0"]
+build = ["pyinstaller>=6.6"]
 
 [project.scripts]
 pfc = "pfc.gui.app:main"

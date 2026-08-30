@@ -63,24 +63,22 @@ python -m pfc.cli selftest        # 写猝发并回读（默认不开射频输�
 
 ## 打包成可双击运行的程序
 
-PyInstaller **必须在目标系统上构建**（在 Mac 上打不出 Windows 包）。
+Mac 上日常开发请直接跑源码（`python -m pfc`），不必打成 `.app`。发布包由 GitHub Actions 构建：推送到 **main**（或在 Actions 里手动 Run）时自动升版本、打 tag、打包 **macOS arm64 / Windows x64** 的 onedir zip，并发布 GitHub Release。不打 Linux 包，以节省 Action 额度。
+
+本地若要验证打包（必须在目标系统上）：
 
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+pip install ".[build]"
 python packaging/build.py
+# 或 ./scripts/build_pyinstaller.sh
 ```
 
 | 平台 | 产物 |
 |------|------|
-| macOS | `dist/PFC.app`，双击打开；同目录内含 `PFC-CLI` |
-| Windows | `dist/PFC/PFC.exe` 与 `PFC-CLI.exe`，整个 `PFC` 文件夹一起拷贝 |
-| Linux | `dist/PFC/PFC` 与 `PFC-CLI` |
+| macOS | `dist/PFC/PFC`，整个 `PFC` 文件夹一起拷贝 |
+| Windows | `dist/PFC/PFC.exe`，整个 `PFC` 文件夹一起拷贝 |
 
-也可在 GitHub 仓库 **Actions → build → Run workflow** 分别产出三个平台的 artifact（tag `v*` 也会触发）。
-
-macOS 首次打开若提示未签名：右键打开，或在「隐私与安全性」中允许。运行时仍需本机已装 NI-VISA 或 libusb。打包体积约 800 MB（含 NumPy / SciPy / Qt / Matplotlib）。
-
-在 Mac 上执行 `python packaging/build.py` 会得到 `dist/PFC.app`（双击）以及 `dist/PFC/` 目录版；**Windows / Linux 安装包需在对应系统上构建**，或推送 tag `v*` / 手动跑 GitHub Action `build`。
+macOS 首次打开若提示未签名：右键打开，或在「隐私与安全性」中允许。运行时仍需本机已装 NI-VISA 或 libusb。CLI（`python -m pfc.cli`）只随源码提供。
 
 ## 开发测试
 
