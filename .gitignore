@@ -1,0 +1,21 @@
+.DS_Store
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env
+.pytest_cache/
+.mypy_cache/
+dist/
+build/
+*.spec.bak
+.pfc_cache/
+pfc/__pycache__/
+
+# 厂商设备文档（手册 / 数据手册 / 快速指南，版权归厂商，不入库）
+*.pdf
+*.PDF
+manuals/
+vendor-docs/
+docs/vendor/

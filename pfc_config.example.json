@@ -1,0 +1,34 @@
+{
+  "instrument": {
+    "scope_visa": "AUTO",
+    "awg_visa": "AUTO",
+    "scope_channel": 1,
+    "awg_channel": 1,
+    "acquire_timeout_s": 8.0,
+    "visa_timeout_ms": 15000,
+    "visa_backend": "auto",
+    "harmonic_bandwidth_hz": 200000,
+    "use_legacy_fft_bins": false,
+    "vertical_scale_v": 0.05,
+    "trigger_level_v": 0.01,
+    "awg_load": "50",
+    "awg_trig_out": "POSitive",
+    "scope_trig_source": "pcd",
+    "scope_trig_channel": 2,
+    "target_fs_hz": 40000000
+  },
+  "experiment": {
+    "frequency_mhz": 1.5,
+    "voltage_mVpp": 20.0,
+    "prf_hz": 1.0,
+    "burst_count": 100,
+    "duration_s": 30.0,
+    "sample_points": 40000,
+    "mb_load_time_s": 5.0,
+    "controller_target_db": 6.0,
+    "max_voltage_mV": 50.0,
+    "study_id": "study",
+    "save_dir": ""
+  },
+  "simulate": false
+}
