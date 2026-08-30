@@ -1,9 +1,11 @@
 # PyInstaller：onedir（与 DG2000-Trigger 相同，macOS 不打 .app）。
-# 产物目录使用 ASCII 名 PFC。macOS 保持 upx=False；Windows 可尝试 UPX。
-# GUI 仍需 numpy / matplotlib(qtagg) / scipy.io；其余科学栈与 Qt 模块尽量排除。
+# spec 在 packaging/ 下，入口脚本路径必须相对仓库根目录（SPECPATH 的上一级），
+# 不能写 "pfc/__main__.py"，否则会去找 packaging/pfc/__main__.py。
 
 import sys
+from pathlib import Path
 
+ROOT = Path(SPECPATH).resolve().parent
 block_cipher = None
 is_win = sys.platform.startswith("win")
 
@@ -102,8 +104,8 @@ excludes = [
 ]
 
 a = Analysis(
-    ["pfc/__main__.py"],
-    pathex=["."],
+    [str(ROOT / "pfc" / "__main__.py")],
+    pathex=[str(ROOT)],
     binaries=[],
     datas=[],
     hiddenimports=[
