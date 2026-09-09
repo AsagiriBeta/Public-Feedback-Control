@@ -7,6 +7,9 @@ end
 nd = str2double(char(read(dev, 1, 'uint8')));
 lenStr = char(read(dev, nd, 'uint8').');
 nbytes = str2double(lenStr);
+if ~(isfinite(nbytes) && nbytes >= 16 && nbytes <= 2e6)
+    error('rigol:ieeeBlock', 'IEEE 块长度异常: %s', lenStr);
+end
 payload = read(dev, nbytes, 'uint8');
 try
     flush(dev, "input");

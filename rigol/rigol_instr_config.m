@@ -1,24 +1,22 @@
 function cfg = rigol_instr_config()
 %RIGOL_INSTR_CONFIG 实验室仪器 VISA 地址与采集参数（请按本机修改）。
 %
-% 在 MATLAB 中运行 visadevlist 或 VISA 资源管理器，将 USB 字符串填入下方。
-% 文档参考：
-%   - DHO800/DHO900 Programming Guide（DHO814 属 DHO800 系列，SCPI 相同）
-%   - DG2000 系列编程手册 / 用户手册（DG2052）
-%
-% USB 驱动：RIGOL 官网安装 USB Test & Measurement Class (USBTMC) / VISA。
+% 示波器接线（当前实验室）：
+%   CH1 = 波形发生器回读（触发源，应看到 1.5 MHz）
+%   CH2 = PCD 接收
 
-cfg.scope_visa = 'USB0::0x1AB1::0x0514::YOUR_DHO814_SERIAL::INSTR'; %#ok<*NASGU>
-cfg.awg_visa   = 'USB0::0x1AB1::0x0641::YOUR_DG2052_SERIAL::INSTR';
+cfg.scope_visa = 'USB0::0x1AB1::0x044D::DHO8A274611769::0::INSTR';
+cfg.awg_visa   = 'USB0::0x1AB1::0x0644::DG2P273601178::0::INSTR';
 
-cfg.scope_channel = 1;   % 1..4，接 PCD 信号的通道
-cfg.awg_channel   = 1;   % 1 或 2
+cfg.scope_tx_channel  = 1;   % 发生器回读
+cfg.scope_pcd_channel = 2;   % PCD
+cfg.scope_channel     = 2;   % 兼容旧代码：默认采 PCD
+cfg.awg_channel       = 1;
 
-cfg.acquire_timeout_s = 8;
+cfg.acquire_timeout_s = 12;
 
-% FFT 频带：原仓库在固定采样率/深度下使用硬编码索引；此处默认按基频自动算谐波带
 cfg.use_legacy_fft_bins = false;
-cfg.harmonic_bandwidth_hz = 200e3;
+cfg.harmonic_bandwidth_hz = 20e3;  % Chien 2022：SC/IC 均为 ±20 kHz
 cfg.legacy_SC_range = 56373:56876;
 cfg.legacy_IC_range = 9187:9690;
 

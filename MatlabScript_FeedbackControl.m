@@ -25,7 +25,7 @@ function varargout = MatlabScript_FeedbackControl(varargin)
 % Last Modified by GUIDE v2.5 02-Feb-2022 09:22:08
 
 % Begin initialization code - DO NOT EDIT
-gui_Singleton = 1;
+gui_Singleton = 0;
 gui_State = struct('gui_Name',       mfilename, ...
     'gui_Singleton',  gui_Singleton, ...
     'gui_OpeningFcn', @MatlabScript_FeedbackControl_OpeningFcn, ...
@@ -56,8 +56,40 @@ handles.output = hObject;
 
 % Update handles structure
 guidata(hObject, handles);
-addpath(pwd)
-addpath(fullfile(pwd, 'rigol'));
+root = fileparts(mfilename('fullpath'));
+addpath(root);
+addpath(fullfile(root, 'rigol'));
+try
+    pfc_apply_gui_layout(hObject);
+catch err
+    warning('PFC:Layout', '界面布局未应用：%s', err.message);
+end
+defdir = fullfile(root, 'data');
+curdir = strtrim(char(get(handles.directory, 'String')));
+if isempty(curdir) || ~isfolder(curdir)
+    if ~isfolder(defdir)
+        mkdir(defdir);
+    end
+    set(handles.directory, 'String', defdir);
+end
+fr = str2double(get(handles.frequency, 'String'));
+if ~(isfinite(fr) && fr > 0)
+    set(handles.frequency, 'String', '1.5');
+end
+bc = str2double(get(handles.BurstCount, 'String'));
+if ~(isfinite(bc) && bc >= 1 && bc <= 2000)
+    set(handles.BurstCount, 'String', '400');
+end
+sn = str2double(get(handles.sampleNum, 'String'));
+if ~(isfinite(sn) && sn >= 4096 && sn <= 50000)
+    set(handles.sampleNum, 'String', '40000');
+end
+pfc_visa('reset_busy');
+handles = guihandles(hObject);
+handles.output = hObject;
+guidata(hObject, handles);
+set(hObject, 'Visible', 'on');
+movegui(hObject, 'onscreen');
 
 % --- Outputs from this function are returned to the command line.
 function varargout = MatlabScript_FeedbackControl_OutputFcn(hObject, eventdata, handles)
@@ -68,6 +100,9 @@ function varargout = MatlabScript_FeedbackControl_OutputFcn(hObject, eventdata, 
 
 % Get default command line output from handles structure
 varargout{1} = handles.output;
+set(handles.output, 'Visible', 'on');
+movegui(handles.output, 'onscreen');
+drawnow;
 
 
 function motor_speed_Callback(hObject, eventdata, handles)
@@ -76,7 +111,6 @@ function motor_speed_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 handles.experimental_motor_speed = round(str2double(get(handles.motor_speed,'String')));
 guidata(hObject, handles);
-check_if_ready(hObject, handles);
 
 
 % --- Executes during object creation, after setting all properties.
@@ -97,7 +131,6 @@ function motor_step_size_Callback(hObject, eventdata, handles)
 % handles    structure with handles and user data (see GUIDATA)
 handles.experimental_motor_step_size = str2double(get(handles.motor_step_size,'String'));
 guidata(hObject, handles);
-check_if_ready(hObject, handles);
 
 % --- Executes during object creation, after setting all properties.
 function motor_step_size_CreateFcn(hObject, eventdata, handles)
@@ -123,11 +156,8 @@ function reconnect_motor_pushbutton_Callback(hObject, eventdata, handles)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
 
-% ret = CsMl_FreeSystem(handle);
-% clear all; close all; clc
-% delete(instrfindall)
-motor_initialize_Homing
-fprintf('Motor is homed\n');
+% 位移台已从界面移除（本实验室无电机）。
+return
 
 function displacement_Callback(hObject, eventdata, handles)
 % hObject    handle to displacement (see GCBO)
@@ -151,33 +181,8 @@ if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgr
 end
 
 % Manual movement of motor defined function
-function manual_motor_move(hObject, handles, motor_dim, is_neg)
-motor_movable = true;
-
-% Check if valid motor step size
-motor_movement_size = str2double(get(handles.motor_step_size,'String'));
-if isnan(motor_movement_size) == true
-    motor_movable = false;
-end
-% Check if valid movement speed
-motor_movement_speed = round(str2double(get(handles.motor_speed,'String')));
-if isnan(motor_movement_speed) == true
-    motor_movable = false;
-end
-% Check if valid displacement
-motor_movement_displacement = str2double(get(handles.displacement,'String'));
-if isnan(motor_movement_displacement) == true
-    motor_movable = false;
-elseif is_neg
-    motor_movement_displacement = -motor_movement_displacement;
-end
-
-% Move the motor
-if motor_movable
-    if abs(motor_movement_displacement) > 0          % CP
-        motor_move(motor_dim, motor_movement_displacement);
-    end
-end
+function manual_motor_move(hObject, handles, motor_dim, is_neg) %#ok<INUSD>
+return
 
 
 % --- Executes on button press in y_neg.
@@ -293,13 +298,7 @@ end
 
 
 
-function frequency_Callback(hObject, eventdata, handles)
-% hObject    handle to frequency (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of frequency as text
-%        str2double(get(hObject,'String')) returns contents of frequency as a double
+function frequency_Callback(hObject, eventdata, handles) %#ok<INUSD>
 
 
 % --- Executes during object creation, after setting all properties.
@@ -316,13 +315,7 @@ end
 
 
 
-function voltage_Callback(hObject, eventdata, handles)
-% hObject    handle to voltage (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of voltage as text
-%        str2double(get(hObject,'String')) returns contents of voltage as a double
+function voltage_Callback(hObject, eventdata, handles) %#ok<INUSD>
 
 
 % --- Executes during object creation, after setting all properties.
@@ -454,407 +447,41 @@ end
 
 
 % --- Executes on button press in PCDcontrol.
-function PCDcontrol_Callback(hObject, eventdata, handles)
-% hObject    handle to PCDcontrol (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-global fgen
-
-
-%% Load GUI parameter for function generator
-SonicationDuration = 20;                               % Total time for sonication [s]
-Fs      = 40e6;                                        % Sampling Frequency [Hz]
-freq    = str2num(get(handles.frequency,'String'));    % frequency [MHz]
-cycle   = str2num(get(handles.BurstCount,'String'));   % burst count
-PRF     = str2num(get(handles.PRF,'String'));          % burst period [s]
-PL      = 1/freq*cycle/1e6;                            % Pulse length [s]
-volt    = str2num(get(handles.voltage,'String'));      % voltage [mVppk]
-offset  = 0;
-depth = str2num(get(handles.sampleNum,'String'));      % Sampling frequency * pulse length
-Vstep = 1;                                             % Step size for voltage ramp
-%% Directory for saving data
-directory= get(handles.directory,'String');
-if ~endsWith(directory, filesep)
-    directory = [directory filesep];
+function PCDcontrol_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if ~pfc_gui_busy(handles, true)
+    return;
 end
-filename = ['PCDcontrol_',get(handles.studyID,'String')];
-
-
-%% RIGOL DHO814：USB-VISA 采集（替代 PicoScope PS5000A）
-cfg = rigol_instr_config();
-scope = rigol_dho814_open();
-info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel);
-timeIntervalNanoSeconds = info.timeIntervalNanoSeconds;
-
-%% data acquisition and FFT setup
-realFs = info.realFs;
-NFFT =2^nextpow2(depth);
-F = realFs.*(0:(NFFT/2))/NFFT;
-freq_hz = freq * 1e6;
-if cfg.use_legacy_fft_bins
-    SC_range = cfg.legacy_SC_range;
-    IC_range = cfg.legacy_IC_range;
-else
-    [SC_range, IC_range] = rigol_fft_harmonic_bands(freq_hz, realFs, NFFT, cfg.harmonic_bandwidth_hz);
+cleanup = onCleanup(@() pfc_gui_busy(handles, false)); %#ok<NASGU>
+try
+    pfc_run_experiment('before', handles);
+catch err
+    errordlg(err.message, '无微泡 CH2');
 end
 
-cd(directory)
 
-
-%% Get and set Figure handle
-cla(handles.realtimeSCplot)
-cla(handles.realtimeICplot)
-cla(handles.realtimeVplot)
-
-pulse = 1;
-axes(handles.FFT_plot);
-FFTax = gca;
-axes(handles.Signal_plot);
-Signalax = gca;
-axes(handles.realtimeSCplot);
-SCplotax = gca;
-axes(handles.realtimeICplot);
-ICplotax = gca;
-axes(handles.realtimeVplot);
-Vplotax = gca;
-
-
-
-%% Initialize Fgen and Start data acquisition
-fgen_excute_UTSW(freq,volt,0,cycle,1/PRF);
-rigol_dg2052_output_set(fgen, true);
-SonicationTimeLeft  = SonicationDuration;
-SonicationStart = tic;
-
-
-while  SonicationTimeLeft > 0
-    
-    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
-    datamat(pulse,:) = chA; 
-    
-    % Plot realtime signal and FFT result
-    set(handles.PulseNum,'String',['Before MB injection; pulse #',num2str(pulse)]);
-    PCD_data = chA;
-    tt = (0:(length(PCD_data)-1)).*double(timeIntervalNanoSeconds).*1e-9.*1e6;
-    plot(Signalax,tt,PCD_data)
-    set(Signalax, 'FontSize', 9,'FontWeight','bold');
-    title(Signalax, 'Time Signal');
-    xlabel(Signalax, 'Time (micro second)')
-    ylabel(Signalax, 'Amplitude')      
-    
-    X = abs(fft(PCD_data,NFFT));
-    Y = X(1:(NFFT/2)+1);
-    semilogy(FFTax,F/1e6,Y);
-    set(FFTax, 'XLim', [0 10]);
-    set(FFTax, 'FontSize', 9,'FontWeight','bold');
-    title(FFTax, 'FFT');
-    xlabel(FFTax, 'Frequency (MHz)')
-    
-    %% Saving acquisition
-    Vbaselinerealtime(pulse) = volt;  
-    RampSC_baseline(pulse) = sum(Y(SC_range));
-    RampIC_baseline(pulse) = sum(Y(IC_range));
-    rigol_dg2052_set_vpp_mV(fgen, volt);
-    
-    %% Plot realtime SC, IC, V
-    hold(SCplotax,'on')
-    plot(SCplotax,pulse,RampSC_baseline(pulse),'b.')
-    set(SCplotax, 'FontSize', 9,'FontWeight','bold');
-    set(SCplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(SCplotax, 'SC');
-    xlabel(SCplotax, 'Pulse #')
-    
-    hold(ICplotax,'on')
-    plot(ICplotax,pulse,RampIC_baseline(pulse),'b.')
-    set(ICplotax, 'FontSize', 9,'FontWeight','bold');
-    set(ICplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(ICplotax, 'IC');
-    xlabel(ICplotax, 'Pulse #')
-    
-    hold(Vplotax,'on')
-    plot(Vplotax,pulse,Vbaselinerealtime(pulse),'bo')
-    set(Vplotax, 'FontSize', 9,'FontWeight','bold');
-    set(Vplotax, 'YLim', [0 50]);
-    set(Vplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(Vplotax, 'Voltage');
-    xlabel(Vplotax, 'Pulse #')
-    drawnow
-    
-    
-    volt = volt+Vstep;
-    pulse = pulse + 1;
-    %% Time remaining
-    SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))
-    if SonicationTimeLeft<=0
-        rigol_dg2052_output_set(fgen, false);
-    end
+function OpenMB_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if ~pfc_gui_busy(handles, true)
+    return;
 end
-
-guidata(hObject, handles);
-
-clear scope
-% Set times for saving file name
-date_format = 'yyyy-mm-dd';
-date_string = datestr(now, date_format);
-time_format = 'HHMMSS';
-time_string = datestr(now, time_format);
-filename = sprintf([filename, '_', date_string,'_',time_string]);
-save([directory,'NoMB_', filename '.mat']);
-clear datamat tempSC_baseline tempIC_baseline RampSC_baseline RampIC_baseline stdSC_baseline stdIC_baseline;
-
-
+cleanup = onCleanup(@() pfc_gui_busy(handles, false)); %#ok<NASGU>
+try
+    pfc_run_experiment('open_mb', handles);
+catch err
+    errordlg(err.message, '有微泡开环');
+end
 
 
 % --- Executes on button press in Sonication.
-function Sonication_Callback(hObject, eventdata, handles)
-% hObject    handle to Sonication (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-%% Sonication Parameters Definition
-global fgen
-BaselineDuration = 5;                                                % 10pulses
-BaselineVolt = 18;                                                   % unit: mVpp, equivilent to 0.2MPa (free-field)
-SonicationDuration = str2num(get(handles.duration,'String'));        % total time for sonication [s]
-Fs      = 40e6;                                                      % Sampling Frequency
-freq    = str2num(get(handles.frequency,'String'));                  % frequency [MHz]
-cycle   = str2num(get(handles.BurstCount,'String'));                 % burst count
-PRF     = str2num(get(handles.PRF,'String'));                        % burst period [s]
-PL      = 1/freq*cycle/1e6;                                          % Pulse length [s]
-volt    = str2num(get(handles.voltage,'String'));                    % voltage [Vppk]
-offset  = 0;
-depth = str2num(get(handles.sampleNum,'String'));                    % Data acquisition length [points]
-Vstep = 1;                                                           % Step size for voltage ramp
-RampSC=0;
-
-TGT = str2num(get(handles.ControllerTarget,'String'));               % Target cavitation level
-VrampFlag = true;
-maxInputV = str2num(get(handles.MaxV,'String'));                     % Max Input voltage for safety
-
-% %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%% RIGOL DHO814（USB-VISA）
-cfg = rigol_instr_config();
-scope = rigol_dho814_open();
-info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel);
-timeIntervalNanoSeconds = info.timeIntervalNanoSeconds;
-
-%% data acquisition and FFT setup
-realFs = info.realFs;
-NFFT =2^nextpow2(depth);
-F = realFs*(0:(NFFT/2))/NFFT;
-freq_hz = freq * 1e6;
-if cfg.use_legacy_fft_bins
-    SC_range = cfg.legacy_SC_range;
-    IC_range = cfg.legacy_IC_range;
-else
-    [SC_range, IC_range] = rigol_fft_harmonic_bands(freq_hz, realFs, NFFT, cfg.harmonic_bandwidth_hz);
+function Sonication_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if ~pfc_gui_busy(handles, true)
+    return;
 end
-filename=get(handles.directory,'string');
-if ~endsWith(filename, filesep)
-    filename = [filename filesep];
+cleanup = onCleanup(@() pfc_gui_busy(handles, false)); %#ok<NASGU>
+try
+    pfc_run_experiment('feedback', handles);
+catch err
+    errordlg(err.message, '闭环反馈');
 end
-studyIDName = get(handles.studyID,'String');
-
-
-%% Get and Set Figure handles
-cla(handles.realtimeSCplot)
-cla(handles.realtimeICplot)
-cla(handles.realtimeVplot)
-
-pulse = 1;
-axes(handles.FFT_plot);
-FFTax = gca;
-axes(handles.Signal_plot);
-Signalax = gca;
-axes(handles.realtimeSCplot);
-SCplotax = gca;
-axes(handles.realtimeICplot);
-ICplotax = gca;
-axes(handles.realtimeVplot);
-Vplotax = gca;
-
-%% Clear variables
-clear tempSC_baseline tempIC_baseline Vbaselinerealtime
-
-
-%% Start baseline cavitation signal acquisition for defining target level (i.e. desired dB level above baseline cavitation signal)
-fgen_excute_UTSW(freq,BaselineVolt,0,cycle,1/PRF);
-SonicationStart = tic;
-MBLoadTime = str2num(get(handles.MBLoadTime,'String'));
-SonicationDuration = BaselineDuration+MBLoadTime;
-SonicationTimeLeft  = SonicationDuration;
-FUSonFlag = true;
-firstFUSon=1;
-while  SonicationTimeLeft > 0
-    if (toc(SonicationStart)>=MBLoadTime)&&(FUSonFlag)
-        rigol_dg2052_output_set(fgen, true);
-        FUSonFlag=false;
-        firstFUSon = pulse;
-    end
-    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
-    datamat(pulse,:) = chA;
-    
-    set(handles.PulseNum,'String',['Baseline acquisition: pulse #',num2str(pulse)]);
-    PCD_data = chA;
-    tt = (0:(length(PCD_data)-1)).*double(timeIntervalNanoSeconds).*1e-9.*1e6;
-    plot(Signalax,tt,PCD_data)
-    set(Signalax, 'FontSize', 9,'FontWeight','bold');
-    title(Signalax, 'Time Signal');
-    xlabel(Signalax, 'Time (micro second)')
-    ylabel(Signalax, 'Amplitude')   
-    
-    X = abs(fft(PCD_data,NFFT));
-    Y = X(1:(NFFT/2)+1);
-    semilogy(FFTax,F/1e6,Y);
-    set(FFTax, 'XLim', [0 10]);
-    set(FFTax, 'FontSize', 9,'FontWeight','bold');
-    title(FFTax, 'FFT');
-    xlabel(FFTax, 'Frequency (MHz)')
-    
-    % Baseline acquisition
-    tempSC_baseline(pulse) = sum(Y(SC_range));
-    tempIC_baseline(pulse) = sum(Y(IC_range));
-    Vrealtime(pulse) = BaselineVolt;  
-    % Plot realtime SC, IC, V
-    hold(SCplotax,'on')
-    plot(SCplotax,pulse,tempSC_baseline(pulse),'b.')
-    set(SCplotax, 'FontSize', 9,'FontWeight','bold');
-    set(SCplotax, 'XLim', [0 60]);
-    title(SCplotax, 'SC');
-    xlabel(SCplotax, 'Pulse #')
-
-    hold(ICplotax,'on')
-    plot(ICplotax,pulse,tempIC_baseline(pulse),'b.')
-    set(ICplotax, 'FontSize', 9,'FontWeight','bold');
-    set(ICplotax, 'XLim', [0 60]);
-    title(ICplotax, 'IC');
-    xlabel(ICplotax, 'Pulse #')
-
-    hold(Vplotax,'on')
-    plot(Vplotax,pulse,Vrealtime(pulse),'bo')
-    set(Vplotax, 'FontSize', 9,'FontWeight','bold');
-    set(Vplotax, 'YLim', [0 50]);
-    set(Vplotax, 'XLim', [0 60]);
-    title(Vplotax, 'Voltage');
-    xlabel(Vplotax, 'Pulse #')
-    drawnow
-    
-    pulse = pulse + 1;
-    % Time remaining
-    SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))
-    if SonicationTimeLeft<=0
-        rigol_dg2052_output_set(fgen, false);
-    end
-end
-stdSC_baseline = std(tempSC_baseline(firstFUSon:end));
-stdIC_baseline = std(tempIC_baseline(firstFUSon:end));
-RampSC_baseline = mean(tempSC_baseline(firstFUSon:end));
-RampIC_baseline = mean(tempIC_baseline(firstFUSon:end));
-SCdesired = 10^(log10(RampSC_baseline*(10^(TGT/10))));
-
-
-%% Start treatment acquisition
-fgen_excute_UTSW(freq,volt,0,cycle,1/PRF);
-rigol_dg2052_output_set(fgen, true);
-SonicationStart = tic;
-SonicationDuration = str2num(get(handles.duration,'String'));        % total time for sonication [s]
-SonicationTimeLeft  = SonicationDuration;
-sumRampSC = 0;
-while  (SonicationTimeLeft > 0)
-
-    [chA, timeIntervalNanoSeconds, ~] = rigol_dho814_acquire_block(scope, depth, cfg.scope_channel);
-    datamat(pulse,:) = chA;
-    
-    set(handles.PulseNum,'String',['During MB injection; pulse #',num2str(pulse)]);
-    PCD_data = chA;
-    tt = (0:(length(PCD_data)-1)).*double(timeIntervalNanoSeconds).*1e-9.*1e6;
-    plot(Signalax,tt,PCD_data)
-    set(Signalax, 'FontSize', 9,'FontWeight','bold');
-    title(Signalax, 'Time Signal');
-    xlabel(Signalax, 'Time (micro second)')
-    
-    
-    X = abs(fft(PCD_data,NFFT));
-    Y = X(1:(NFFT/2)+1); 
-    semilogy(FFTax,F/1e6,Y); 
-    set(FFTax, 'XLim', [0 10]);
-    set(FFTax, 'FontSize', 9,'FontWeight','bold');
-    title(FFTax, 'FFT');
-    xlabel(FFTax, 'Frequency (MHz)')
-
-    
-    %% Feedback control processing: Using VrampFlag to determine the phase of feedback control algorithm
-    % VrampFlag = true --> pressure ramping-up phase
-    % VrampFlag = false --> pressure maintaining phase
-    % RampSC/RampIC --> record realtime SC level and IC level
-    
-    Vrealtime(pulse) = volt;
-    RampSC(pulse) = sum(Y(SC_range));
-    RampIC(pulse) = sum(Y(IC_range));
-    
-
-    sumRampSC = sum(RampSC(firstFUSon:end));
-    if VrampFlag      
-        if ((RampSC(pulse)>= SCdesired)&&(firstFUSon~=pulse))
-            FeedbackEvent = pulse;
-            VrampFlag = false;
-            Tolcoeff = 0.4;
-            tolerance_posrange = 10^(log10(RampSC_baseline*(10^((TGT+Tolcoeff)/10))));
-            tolerance_negrange = 10^(log10(RampSC_baseline*(10^((TGT-Tolcoeff)/10))));
-
-        else
-            volt = volt+Vstep;
-            if volt>maxInputV, volt = maxInputV; end
-        end
-
-    else
-        step = 1;
-        if (RampSC(pulse)>tolerance_posrange)
-            volt = volt-step;
-        elseif (RampSC(pulse)<tolerance_negrange)
-            volt = volt+step;
-            if volt>maxInputV, volt = maxInputV; end
-        end
-    end
-    rigol_dg2052_set_vpp_mV(fgen, volt);
-    
-    %% Plot realtime SC, IC, V
-    hold(SCplotax,'on')
-    plot(SCplotax,pulse,RampSC(pulse),'b.')
-    set(SCplotax, 'FontSize', 9,'FontWeight','bold');
-    set(SCplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(SCplotax, 'SC');
-    xlabel(SCplotax, 'Pulse #')
-    
-    hold(ICplotax,'on')
-    plot(ICplotax,pulse,RampIC(pulse),'b.')
-    set(ICplotax, 'FontSize', 9,'FontWeight','bold');
-    set(ICplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(ICplotax, 'IC');
-    xlabel(ICplotax, 'Pulse #')
-    
-    hold(Vplotax,'on')
-    plot(Vplotax,pulse,Vrealtime(pulse),'bo')
-    set(Vplotax, 'FontSize', 9,'FontWeight','bold');
-    set(Vplotax, 'YLim', [0 maxInputV]);
-    set(Vplotax, 'XLim', [0 SonicationDuration*2+5]);
-    title(Vplotax, 'Voltage');
-    xlabel(Vplotax, 'Pulse #')
-    drawnow
-    
-    %% Time remaining
-    SonicationTimeLeft  = (SonicationDuration - toc(SonicationStart))%(SonicationDuration - toc)/60;
-    TimeRecord(pulse) = SonicationTimeLeft;
-    if (SonicationTimeLeft<=0)
-        rigol_dg2052_output_set(fgen, false);
-    end
-    pulse = pulse + 1;
-end
-
-clear scope
-save([filename studyIDName '.mat']);
-clear datamat Vrealtime RampSC RampIC TimeRecord
-
 
 
 function ControllerTarget_Callback(hObject, eventdata, handles)
@@ -909,13 +536,9 @@ function stop_Callback(hObject, eventdata, handles)
 % hObject    handle to stop (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-global fgen
-try
-    if ~isempty(fgen)
-        rigol_dg2052_output_set(fgen, false);
-    end
-catch
-end
+global fgen pfc_abort
+pfc_abort = true;
+pfc_visa('rf_off');
 
 
 
@@ -942,18 +565,105 @@ end
 
 
 % --- Executes on button press in IniFgen.
-function IniFgen_Callback(hObject, eventdata, handles)
-% hObject    handle to IniFgen (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
+function IniFgen_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if pfc_visa('is_busy')
+    warndlg('采集进行中，请先 STOP。', 'PFC');
+    return;
+end
+try
+    p = pfc_gui_fus_params(handles);
+    fgen_initialize_UTSW(p.freq_mhz, p.volt_mVpp, 0, p.n_cycle, p.period_s);
+    rigol_dg2052_output_set(pfc_visa('fgen'), false);
+    set(handles.PulseNum, 'String', sprintf( ...
+        '已配置猝发  %.3g MHz  %.4g mVpp  %d cyc  PRF %.3g Hz（输出关闭）', ...
+        p.freq_mhz, p.volt_mVpp, p.n_cycle, p.prf_hz));
+catch err
+    errordlg(err.message, '初始化信号源');
+end
 
+
+function OneshotFFT_Callback(hObject, eventdata, handles) %#ok<INUSL>
+% 开环：发一帧。调试看 CH1 FFT；PCD 波形仍存 CH2。
 global fgen
+if ~pfc_gui_busy(handles, true)
+    return;
+end
+cleanup = onCleanup(@() pfc_gui_busy(handles, false)); %#ok<NASGU>
+outdir = pfc_ensure_save_dir(handles);
+cfg = rigol_instr_config();
+[freq, volt] = pfc_gui_acquire_fv(handles);
+cycle = str2double(get(handles.BurstCount,'String'));
+PRF = str2double(get(handles.PRF,'String'));
+depth = str2double(get(handles.sampleNum,'String'));
+Fs = 40e6;
+if any(isnan([freq, cycle, PRF, volt, depth]))
+    errordlg('请先填写采集框频率/电压，以及 PRF、Burst、Depth。', 'PFC');
+    return;
+end
 
-%% function generator initialization
+set(handles.PulseNum, 'String', '采集中 Acquiring…');
+drawnow;
 
-% fgen_inital_Verasonics
-freq    = str2num(get(handles.frequency,'String'));      %frequency [MHz]
-cycle   = str2num(get(handles.BurstCount,'String'));        %burst count
-PRF     = str2num(get(handles.PRF,'String'));        %burst period [s]
-volt    = str2num(get(handles.voltage,'String'));    %voltage [mVppk]
-fgen_initialize_UTSW(freq,volt,0,cycle,1/PRF);
+scope = rigol_dho814_open();
+info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel, max(5e-4, 0.25*(volt/1000)));
+fgen_excute_UTSW(freq, volt, 0, cycle, 1/PRF);
+try
+    rigol_dg2052_output_set(fgen, true);
+    [chA, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, depth, cfg.scope_pcd_channel);
+    rigol_dg2052_output_set(fgen, false);
+catch err
+    try
+        rigol_dg2052_output_set(fgen, false);
+    catch
+    end
+    rethrow(err);
+end
+
+pfc_update_signal_fft(handles, chTx, dt_ns, realFs, freq, 'CH1 回读 TX');
+[F, Y, db, NFFT] = pfc_spectrum(chTx, realFs);
+
+S = struct();
+S.chA = chA;
+S.chTx = chTx;
+S.realFs = realFs;
+S.timeIntervalNanoSeconds = dt_ns;
+S.f_Hz = F;
+S.fft_abs = Y;
+S.fft_dB = db;
+S.NFFT = NFFT;
+S.freq_MHz = freq;
+S.volt_mVpp = volt;
+S.PRF_Hz = PRF;
+S.BurstCount = cycle;
+S.studyID = get(handles.studyID,'String');
+fp = pfc_save_acquisition(outdir, ['oneshot_' S.studyID], S);
+set(handles.PulseNum, 'String', ['已保存 Saved  ' fp]);
+
+
+function DebugRun_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if ~pfc_gui_busy(handles, true)
+    return;
+end
+cleanup = onCleanup(@() pfc_gui_busy(handles, false)); %#ok<NASGU>
+outdir = pfc_ensure_save_dir(handles);
+opts = struct();
+opts.handles = handles;
+opts.outdir = outdir;
+[opts.freq_mhz, opts.volt_mVpp] = pfc_gui_acquire_fv(handles);
+opts.prf_hz = str2double(get(handles.PRF,'String'));
+opts.n_cycle = str2double(get(handles.BurstCount,'String'));
+opts.npts = str2double(get(handles.sampleNum,'String'));
+if ~isfinite(opts.freq_mhz) || opts.freq_mhz <= 0, opts.freq_mhz = 1.5; end
+if ~isfinite(opts.volt_mVpp) || opts.volt_mVpp <= 0, opts.volt_mVpp = 20; end
+if ~isfinite(opts.prf_hz) || opts.prf_hz <= 0, opts.prf_hz = 2; end
+if ~isfinite(opts.n_cycle) || opts.n_cycle < 1, opts.n_cycle = 400; end
+if ~isfinite(opts.npts) || opts.npts < 1024, opts.npts = 40000; end
+opts.npts = min(opts.npts, 40000);
+opts.n_cycle = min(opts.n_cycle, 800);
+try
+    pfc_debug_no_mb(opts);
+catch err
+    errordlg(err.message, '调试采集');
+end
+
+

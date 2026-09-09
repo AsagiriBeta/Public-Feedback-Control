@@ -1,96 +1,63 @@
 # Public-Feedback-Control
 
-PCD（被动空化检测）采集与闭环超声反馈控制。算法来自 Washington University Chen 实验室开源实现（Chien 等, *CMMM* 2022, [9867230](https://doi.org/10.1155/2022/9867230)）。
+PCD（被动空化检测）采集与闭环超声反馈控制。算法来自 Washington University Chen 实验室（Chien 等, *CMMM* 2022, [9867230](https://doi.org/10.1155/2022/9867230)）。本实验室 PCD 中心约 **3 MHz**，稳态空化 SC 用 **2f（3.0 MHz）**，不用原文因 4.7 MHz PCD 而选的 3f（4.5 MHz）。
 
-本仓库以 **Python + PyVISA** 为主，可在 macOS / Windows / Linux 上运行；原 MATLAB 脚本仍保留作对照。
+本仓库以 **MATLAB + Instrument Control Toolbox（`visadev`）+ NI-VISA** 运行，硬件为实验室 **RIGOL DHO814** 与 **RIGOL DG2052**。
 
 ## 硬件
 
 | 角色 | 型号 | 接口 |
 |------|------|------|
-| 示波器 | **RIGOL DHO814**（DHO800 系列，12 bit，100 MHz，单通道 25 Mpts） | USB-VISA / USBTMC |
-| 信号源 | **RIGOL DG2052**（DG2000 系列，50 MHz，双通道） | USB-VISA |
+| 示波器 | **RIGOL DHO814**（DHO800 系列） | USB-VISA / USBTMC |
+| 信号源 | **RIGOL DG2052**（DG2000 系列） | USB-VISA |
 
-示波器读波按手册 **3.28** 节：`:STOP` → `:WAVeform:MODE RAW` → `:WAVeform:FORMat WORD` → `:WAVeform:DATA?`，电压换算 `(raw − YORigin − YREFerence) × YINCrement`。  
-信号源猝发命令顺序与实验室 **DG2000-Trigger** 控制器一致：`:APPL:SIN`、先关输出、猝发参数写完再 `:BURSt:STATe ON`；内部 PRF 的同时打开后面板 `:BURSt:TRIGger:TRIGOut POSitive`，供示波器硬件同步。
+VISA 地址在 `rigol/rigol_instr_config.m`。换仪器后在 MATLAB 执行 `visadevlist`，把 `ResourceName` 填进去。
 
-USB 资源示例（序列号因机而异，界面「扫描」后可从下拉框选择，也可填 `AUTO` 按 `*IDN?` 识别）：
+官方手册请从产品页下载；本机副本可放在 `manuals/`（不入库）。
 
-- DHO814：`USB0::0x1AB1::0x0514::<SERIAL>::INSTR`
-- DG2052：`USB0::0x1AB1::0x0641::<SERIAL>::INSTR`（手册示例有时为 `0x0642`）
+### 接线（本实验室）
 
-官方手册与数据手册请从产品页下载（仓库不收录厂商 PDF）：[DHO800](https://www.rigol.com/zh_CN/products/oscilloscope/DHO800.html) · [DG2000](https://www.rigol.com/zh_CN/products/function-arbitrary-waveform-generator/DG2000.html)
+| 示波器 | 信号 |
+|--------|------|
+| **CH1** | 波形发生器回读（触发；FFT 应见 **1.5 MHz**） |
+| **CH2** | PCD 接收 |
 
-### 推荐接线（硬件触发）
+DHO814 **没有 EXT 口**，因此用 CH1 边沿触发每一发。无换能器/50 Ω 负载时不要打开射频输出。
 
-DHO814 **没有 EXT 口**。把 DG2052 该通道后面板 **[Sync/Ext Mod/Trig/FSK]** 接到示波器另一模拟通道（默认 CH2），界面「触发源」选 **AWG 同步**。这样每个超声猝发都有 TTL 边沿，比用微弱 PCD 信号边沿触发稳定得多（做法来自 DG2000-Trigger 的 CH1→CH2 外触发链路）。
+## 运行
 
-驱动 50 Ω 功放时，AWG 负载选 **50**（默认）；高阻探头/开路选 **INFinity**。
+需要：**MATLAB R2020b+**（本机为 R2025b）、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
 
-## 在 Mac 上运行（源码）
-
-1. 安装 **Python 3.10+**。
-2. 安装 VISA（二选一）：
-   - 推荐：[NI-VISA](https://www.ni.com/en/support/downloads/drivers/download.ni-visa.html)（macOS 安装后重启）
-   - 或仅用纯 Python：`pip install pyvisa-py pyusb`，并安装 [libusb](https://libusb.info/)（`brew install libusb`）
-3. 用 USB 连接 DHO814 与 DG2052。
-4. 安装依赖并启动：
-
-```bash
-cd Public-Feedback-Control
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-python -m pfc --simulate          # 无仪器时看界面
-python -m pfc                     # 接仪器
-python -m pfc.cli list            # 列出 VISA 设备
-python -m pfc.cli selftest        # 写猝发并回读（默认不开射频输出）
+```matlab
+cd('/Users/asagiri/Projects/Public-Feedback-Control')
+start_gui          % GUIDE 主界面
 ```
 
-配置保存在 `~/.pfc/config.json`（可用 `pfc_config.example.json` 作模板）。界面里也可选 **仿真** 模式。
+界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT 并写入 `data/`（或你选的保存目录）。**PCDcontrol** / **Sonication** 每一发同样刷新时域+FFT，结束后把全部脉冲存成 `.mat`。
 
-### 界面操作
+DHO814 **示波器屏幕上有 Math FFT**（最多约 1 Mpts，见 [DHO800 数据手册](https://download.rigol.com/en/Manual/Digital%20Oscilloscope/DHO800/DHO800_DataSheet_EN.pdf) 与编程手册 `:MATH:FFT:*`）。闭环用的二次谐波 SC（2f）/ IC 宽带和存盘分析在 **电脑端 FFT** 完成，不依赖把示波器 MATH 波形读回来。
 
-1. **扫描** → **连接**（或选仿真后连接）。
-2. **初始化信号源**：写入频率 / 周期数 / PRF / 幅度，输出保持关闭。
-3. **PCD 基线**：约 20 s 升压采集，保存 `NoMB_PCDcontrol_*.npz/.mat`。
-4. **闭环超声**：MB 等待 → 基线 → 升压到目标 SC → 在容差带内维持；**Escape / 停止** 立即关输出。
-5. 数据目录与编号在左侧「实验」栏。
+无换能器/50 Ω 负载时不要打开射频输出。
 
-幅度单位为 **mVpp**。若仍用 PCD 通道边沿触发，请把垂直档位与触发电平调到实际探头幅度，否则单次触发可能超时。
+命令窗口也可：
 
-未移植原 MATLAB 界面中的位移台（仓库内无电机驱动）。信号源 SCPI、后面板同步与「采集时 GUI 不抢写 VISA」对齐同实验室 **DG2000-Trigger** 控制器。
-
-## 打包成可双击运行的程序
-
-Mac 上日常开发请直接跑源码（`python -m pfc`），不必打成 `.app`。发布包由 GitHub Actions 构建：推送到 **main**（或在 Actions 里手动 Run）时自动升版本、打 tag、打包 **macOS arm64 / Windows x64** 的 onedir zip，并发布 GitHub Release。不打 Linux 包，以节省 Action 额度。
-
-本地若要验证打包（必须在目标系统上）：
-
-```bash
-pip install ".[build]"
-python packaging/build.py
-# 或 ./scripts/build_pyinstaller.sh
+```matlab
+addpath('rigol')
+test_dg2052_connection   % 信号源自检（默认不开输出）
+oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保存
 ```
 
-| 平台 | 产物 |
+## 目录
+
+| 路径 | 内容 |
 |------|------|
-| macOS | `dist/PFC/PFC`，整个 `PFC` 文件夹一起拷贝 |
-| Windows | `dist/PFC/PFC.exe`，整个 `PFC` 文件夹一起拷贝 |
+| `MatlabScript_FeedbackControl.m` / `.fig` | GUIDE 主界面 |
+| `start_gui.m` | 启动入口 |
+| `rigol/` | DHO814 / DG2052 驱动与自检、单次收发 |
+| `data/` | 采集默认保存目录（不入库） |
 
-macOS 首次打开若提示未签名：右键打开，或在「隐私与安全性」中允许。运行时仍需本机已装 NI-VISA 或 libusb。CLI（`python -m pfc.cli`）只随源码提供。
-
-## 开发测试
-
-```bash
-pip install pytest
-pytest
-```
-
-## MATLAB 旧版
-
-需要 Instrument Control Toolbox 与 `visadev`。编辑 `rigol/rigol_instr_config.m` 填入 VISA 地址后，运行 `MatlabScript_FeedbackControl`。细节见历史说明；新实验请用 Python 版。
+幅度单位为 **mVpp**。本实验室无位移台，电机区已从界面隐藏。
 
 ## 许可
 
-©2022 Washington University。非商业、非临床、不可用于人体；完整条款见仓库原版权声明。RIGOL 仪器层与 Python 改写为本实验室扩展。
+©2022 Washington University。非商业、非临床、不可用于人体。RIGOL 仪器层为本实验室扩展。

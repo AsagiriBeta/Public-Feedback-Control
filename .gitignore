@@ -1,21 +1,38 @@
 .DS_Store
-__pycache__/
-*.py[cod]
-*.egg-info/
-.venv/
-venv/
-.env
-.pytest_cache/
-.mypy_cache/
-dist/
-build/
-*.spec.bak
-.pfc_cache/
-pfc/__pycache__/
+Thumbs.db
 
-# 厂商设备文档（手册 / 数据手册 / 快速指南，版权归厂商，不入库）
+# MATLAB
+*.asv
+*.m~
+*.bak
+*.fig.bak
+slprj/
+*.slx.autosave
+*.autosave
+
+# 实验数据（.mat 大、含动物 ID；频谱导出也不入库）
+data/
+*.mat
+*.png
+*.jpg
+*.jpeg
+*.csv
+
+# 厂商手册 / 论文 PDF（版权，体积大）
 *.pdf
 *.PDF
 manuals/
 vendor-docs/
-docs/vendor/
+
+# 本地 / 编辑器
+.cursor/
+.vscode/
+*.code-workspace
+
+# 若还残留 Python 构建产物
+.venv/
+__pycache__/
+*.pyc
+dist/
+build/
+*.egg-info/

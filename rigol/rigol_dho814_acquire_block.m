@@ -1,62 +1,88 @@
-function [chA, timeIntervalNanoSeconds, realFs] = rigol_dho814_acquire_block(dev, npts, ch)
-%RIGOL_DHO814_ACQUIRE_BLOCK 单次触发后读取 RAW 波形（WORD），返回电压行向量。
-% 流程参考 DHO800 编程手册 3.28 节 :WAVeform:DATA?
+function [chPcd, timeIntervalNanoSeconds, realFs, chTx] = rigol_dho814_acquire_block(dev, npts, ch, mode, timeout_s)
+%RIGOL_DHO814_ACQUIRE_BLOCK
+% 'single'：等 CH1 边沿后读 RAW。触发超时则返回空，不空等 visadev 60s。
+% 'live'：短暂停后读 RAW（连续波调试）。
 cfg = rigol_instr_config();
 if nargin < 3 || isempty(ch)
-    ch = cfg.scope_channel;
+    ch = cfg.scope_pcd_channel;
 end
-chan = sprintf('CHANnel%d', ch);
+if nargin < 4 || isempty(mode)
+    mode = 'single';
+end
+if nargin < 5 || isempty(timeout_s)
+    timeout_s = cfg.acquire_timeout_s;
+end
+tx = cfg.scope_tx_channel;
+oldT = [];
+try
+    oldT = dev.Timeout;
+    dev.Timeout = min(8, max(3, timeout_s + 2));
+catch
+end
 
-writeline(dev, ':RUN');
-writeline(dev, ':SINGle');
-t0 = tic;
-ok = false;
-while toc(t0) < cfg.acquire_timeout_s
-    st = rigol_visa_query(dev, ':TRIGger:STATus?');
-    if contains(st, 'STOP', 'IgnoreCase', true)
-        ok = true;
-        break;
+chPcd = [];
+chTx = [];
+xinc = NaN;
+try
+    if strcmpi(mode, 'live')
+        writeline(dev, ':STOP');
+        pause(0.05);
+    else
+        writeline(dev, ':SINGle');
+        t0 = tic;
+        ok = false;
+        while toc(t0) < timeout_s
+            st = rigol_visa_query(dev, ':TRIGger:STATus?');
+            if contains(st, 'STOP', 'IgnoreCase', true)
+                ok = true;
+                break;
+            end
+            pause(0.01);
+        end
+        if ~ok
+            writeline(dev, ':STOP');
+            restore_timeout(dev, oldT);
+            realFs = 40e6;
+            timeIntervalNanoSeconds = 1e9 / realFs;
+            return;
+        end
+        writeline(dev, ':STOP');
     end
-    pause(0.005);
-end
-if ~ok
-    error('rigol:dho814:timeout', 'DHO814 单次触发超时（%.1f s）', cfg.acquire_timeout_s);
-end
 
-writeline(dev, ':STOP');
-
-writeline(dev, sprintf(':WAVeform:SOURce %s', chan));
-writeline(dev, ':WAVeform:MODE RAW');
-writeline(dev, ':WAVeform:FORMat WORD');
-writeline(dev, sprintf(':WAVeform:POINts %d', npts));
-writeline(dev, ':WAVeform:STARt 1');
-writeline(dev, sprintf(':WAVeform:STOP %d', npts));
-
-yinc = str2double(rigol_visa_query(dev, ':WAVeform:YINCrement?'));
-yor = str2double(rigol_visa_query(dev, ':WAVeform:YORigin?'));
-yref = str2double(rigol_visa_query(dev, ':WAVeform:YREFerence?'));
-xinc = str2double(rigol_visa_query(dev, ':WAVeform:XINCrement?'));
-
-writeline(dev, ':WAVeform:DATA?');
-payload = rigol_read_ieee_block_binary(dev);
-
-if mod(numel(payload), 2) ~= 0
-    error('rigol:dho814:waveform', 'WORD 波形字节数为奇数');
-end
-iv = typecast(uint8(payload), 'int16');
-nv = numel(iv);
-chA = (double(iv(:)).' - yor - yref) .* yinc;
-
-if numel(chA) > npts
-    chA = chA(1:npts);
-elseif numel(chA) < npts
-    tmp = zeros(1, npts);
-    tmp(1:numel(chA)) = chA;
-    chA = tmp;
+    [chPcd, xinc] = read_raw(dev, ch, npts);
+    if nargout >= 4
+        [chTx, x2] = read_raw(dev, tx, npts);
+        if ~(isfinite(xinc) && xinc > 0) && isfinite(x2) && x2 > 0
+            xinc = x2;
+        end
+    end
+catch
+    chPcd = [];
+    chTx = [];
 end
 
+if ~(isfinite(xinc) && xinc > 0)
+    xinc = 1 / 40e6;
+end
 realFs = 1 / xinc;
 timeIntervalNanoSeconds = xinc * 1e9;
+restore_timeout(dev, oldT);
+end
 
-writeline(dev, ':RUN');
+function [y, xinc] = read_raw(dev, ch, npts)
+try
+    [y, xinc] = rigol_dho814_read_channel(dev, ch, npts, 'RAW');
+catch
+    y = [];
+    xinc = NaN;
+end
+end
+
+function restore_timeout(dev, oldT)
+if ~isempty(oldT)
+        try
+            dev.Timeout = oldT;
+        catch
+        end
+end
 end

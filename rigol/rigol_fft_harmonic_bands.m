@@ -1,11 +1,10 @@
 function [SC_range, IC_range] = rigol_fft_harmonic_bands(f0_hz, Fs, NFFT, bw_hz)
-%RIGOL_FFT_HARMONIC_BANDS 由基频估计第三谐波(SC)与 f0/2 附近(IC)的 FFT 索引范围。
-% 对应 Chien et al. 2022 中在固定 Picoscope 配置下使用的频带思想；此处随实际 Fs/NFFT 自适应。
-
+%RIGOL_FFT_HARMONIC_BANDS 本实验室：SC=2 f0（3.0 MHz），IC=2.2 f0（3.3 MHz）。
+%  Chien 2022 用 3f=4.5 MHz 因 PCD~4.7 MHz；此处 PCD~3 MHz，故 SC 用 2f。
 df = Fs / NFFT;
 nmax = floor(NFFT / 2) + 1;
-SC_range = fft_band_indices(3 * f0_hz, df, nmax, bw_hz);
-IC_range = fft_band_indices(f0_hz / 2, df, nmax, bw_hz);
+SC_range = fft_band_indices(2 * f0_hz, df, nmax, bw_hz);
+IC_range = fft_band_indices(2.2 * f0_hz, df, nmax, bw_hz);
 end
 
 function r = fft_band_indices(fc, df, nmax, bw)

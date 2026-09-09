@@ -1,11 +1,10 @@
 function dev = rigol_dho814_open(visaAddr)
-%RIGOL_DHO814_OPEN 打开 DHO814（DHO800 系列）USBTMC 连接。
-if nargin < 1 || isempty(visaAddr)
-    visaAddr = rigol_instr_config().scope_visa;
+%RIGOL_DHO814_OPEN 复用已有 DHO814 visadev，不要对同一 USB 资源 new 第二次。
+if nargin >= 1 && ~isempty(visaAddr)
+    cfg = rigol_instr_config();
+    if ~strcmp(visaAddr, cfg.scope_visa)
+        warning('rigol:dho814:open', '忽略传入地址，使用 rigol_instr_config 中的单例连接。');
+    end
 end
-if ~exist('visadev', 'file')
-    error('rigol:visadev', '需要 MATLAB Instrument Control Toolbox 提供的 visadev（建议 R2020b+）。');
-end
-dev = visadev(visaAddr);
-dev.Timeout = 15;
+dev = pfc_visa('scope');
 end
