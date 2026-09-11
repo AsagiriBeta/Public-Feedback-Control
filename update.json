@@ -1,1 +1,1 @@
-{"version":"0.1.1","url":"https://github.com/AsagiriBeta/Public-Feedback-Control/releases/latest/download/PFC_Installer.exe","notes":"修复「检查更新」首次使用要手工配更新源的问题：更新源现在有内置默认值（本仓库的 GitHub raw 地址），装上即可用；本地 pfc_update.ini 改为可选的覆盖，source=none 才是关闭检查。另：clear_source 语义纠正为「回到默认源」而不是关闭。"}
+{"version":"0.1.2","url":"https://github.com/AsagiriBeta/Public-Feedback-Control/releases/download/v0.1.2/PFC_Installer_v0.1.2.exe","notes":"修复「检查更新」首次使用要手工配更新源的问题：更新源现在有内置默认值（本仓库的 GitHub raw 地址），装上即可用；本地 pfc_update.ini 改为可选的覆盖，source=none 才是关闭检查。另：clear_source 语义纠正为「回到默认源」而不是关闭。"}

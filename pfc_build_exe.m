@@ -7,7 +7,8 @@ function pfc_build_exe(varargin)
 %   pfc_build_exe                 编译 exe，并打包含 MATLAB Runtime 的安装程序
 %   pfc_build_exe('noinstaller')  只编译 exe
 %
-% 产物在 <项目根>/build/ 下。目标机运行前需安装：
+% 产物在 <项目根>/build/ 下：pfc_app.exe（程序本体）与
+% PFC_Installer_v<版本>.exe（分发包，文件名带版本号以便区分）。目标机运行前需安装：
 %   1) MATLAB Runtime（版本与编译用的 MATLAB 一致）
 %   2) NI-VISA（或仪器厂商 VISA）——visadev 依赖它，且不在 Runtime 内
 %
@@ -82,7 +83,15 @@ else
     delivery = 'web';
 end
 
-fprintf('[2/2] 打包安装程序（RuntimeDelivery=%s）...\n', delivery);
+% Version 必须显式传：不给的话，安装包一律自称 1.0（跟真实版本无关），
+% 于是每个版本的安装包在 Windows 眼里都是同一个 1.0 —— 覆盖安装时安装器分不清新旧，
+% 会出现「装完新的，%ProgramFiles%\pfc_app\application\pfc_app.exe 还是旧的」。
+% 传了之后注册表 DisplayVersion 与安装包版本都跟着 pfc_version 走。
+% 发布者信息填在这里，会显示在 Windows「应用和功能」里。
+publisher = 'AsagiriBeta';
+appVer = pfc_version();
+asset = pfc_installer_asset(appVer);   % 文件名带版本号，规则见该函数
+fprintf('[2/2] 打包安装程序（RuntimeDelivery=%s，版本 %s）...\n', delivery, appVer);
 if ~hasLocalRuntime
     fprintf('      本机无 MATLAB Runtime 安装包：目标机安装时自动联网下载 Runtime。\n');
     fprintf('      想改成断网也能装的离线包，先执行 compiler.runtime.download 再重跑本脚本。\n');
@@ -90,9 +99,15 @@ end
 try
     compiler.package.installer(res, ...
         'RuntimeDelivery', delivery, ...
-        'InstallerName', 'PFC_Installer', ...
+        'InstallerName', asset.base, ...
+        'Version', appVer, ...
+        'AuthorName', publisher, ...
+        'AuthorCompany', publisher, ...
+        'Summary', sprintf('Public Feedback Control %s', pfc_version('label')), ...
+        'Description', sprintf(['Public Feedback Control %s ' ...
+            '(DHO814 oscilloscope / DG2052 signal generator)'], pfc_version('label')), ...
         'OutputDir', outDir);
-    fprintf('      完成：%s\n', outDir);
+    fprintf('      完成：%s\n', fullfile(outDir, asset.name));
 catch err
     warning('PFC:build:installer', ...
         ['生成安装包失败：%s\n' ...
@@ -104,25 +119,24 @@ end
 % version 直接取 pfc_version()，省掉「版本号改了但清单忘改」这个最容易漏的坑；
 % url 沿用上一次的值 —— 那是 GitHub Release 的稳定地址，发新版不用改。
 % 安装包没生成就不动清单，免得它指向不存在的文件。
-write_release_manifest(root, outDir, 'PFC_Installer.exe');
+write_release_manifest(root, outDir, asset);
 end
 
-function write_release_manifest(root, outDir, installerName)
+function write_release_manifest(root, outDir, asset)
 %WRITE_RELEASE_MANIFEST 刷新仓库根目录下的 update.json。
 % 放在仓库根而不是 build/：它要跟着仓库走（目标机按 raw 链接取），
 % 而 build/ 是可再生的临时目录。
-if ~isfile(fullfile(outDir, installerName))
+% version 与 url 都从 asset 取：安装包文件名带版本号后，url 必须跟着版本走，
+% 沿用上一次的地址会指向不存在的老文件名。
+if ~isfile(fullfile(outDir, asset.name))
     return;
 end
 f = fullfile(root, 'update.json');
-[url, notes] = read_prev(f);
-if isempty(url)
-    url = installerName;   % 退化成相对文件名：按清单所在目录解析
-end
+notes = read_prev_notes(f);
 if isempty(notes)
     notes = '（发版时补更新说明）';
 end
-m = struct('version', pfc_version(), 'url', url, 'notes', notes);
+m = struct('version', asset.version, 'url', asset.url, 'notes', notes);
 fid = fopen(f, 'w');
 if fid < 0
     warning('PFC:build:manifest', '无法写入发布清单：%s', f);
@@ -131,22 +145,19 @@ end
 fwrite(fid, jsonencode(m));
 fclose(fid);
 fprintf('      发布清单：%s\n', f);
-fprintf('        version=%s\n        url=%s\n', m.version, url);
+fprintf('        version=%s\n        url=%s\n', m.version, m.url);
 end
 
-function [u, n] = read_prev(f)
+function n = read_prev_notes(f)
 % 复用 pfc_update 的清单解析（含 BOM 容错），避免两处各写一套规则。
-% url 与 notes 都沿用上一次的值：它们由你维护（发新版时才改），不该被每次 build 冲掉。
-u = '';
+% 只沿用 notes（更新说明由你维护，不该被每次 build 冲掉）；
+% url 反过来必须每次重算，因为文件名带版本号。
 n = '';
 if ~isfile(f)
     return;
 end
 try
     m = pfc_update('manifest', f);
-    if isfield(m, 'url')
-        u = strtrim(char(string(m.url)));
-    end
     if isfield(m, 'notes')
         n = strtrim(char(string(m.notes)));
     end

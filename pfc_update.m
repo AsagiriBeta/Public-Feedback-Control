@@ -4,32 +4,30 @@ function varargout = pfc_update(cmd, varargin)
 %   info = pfc_update('check')        读更新清单，跟当前版本比
 %          pfc_update('apply', info)  下载更新包并启动安装程序（装完即新版本）
 %   s    = pfc_update('source')       当前生效的更新源
-%          pfc_update('set_source')   弹框让用户填更新源
-%          pfc_update('set_source', s) 直接设置
-%          pfc_update('clear_source') 删掉本地覆盖，回到代码内置的默认源
-%   f    = pfc_update('file')         更新源配置文件路径
+%   f    = pfc_update('file')         更新源配置文件路径（仅供运维覆盖）
 %
 % ── 更新源 ──────────────────────────────────────────────────────────
-% **默认源就是本项目在 GitHub 上的发布仓库**（写死在 default_source() 里），
-% 所以目标机装上就能直接「检查更新」，不用先手工配一遍：
+% 对用户完全透明：源写死在 default_source() 里，点「检查更新」直接用，
+% 界面上没有也不需要任何配置入口：
 %     https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 %
-% 要换源就在 <工作根>/pfc_update.ini 里覆盖（和 rigol_config.ini 一个套路）：
+% 只有运维需要换源时（内网服务器、局域网共享、隔离网无法回源）才用得上
+% <工作根>/pfc_update.ini 覆盖，界面上不暴露、出错时也不提示它：
 %     source=https://example.com/pfc/update.json    任意 HTTPS（Gitee、内网服务器同理）
 %     source=\\server\share\pfc\update.json         局域网共享，目标机不必上网
 %     source=none                                   关闭更新检查
 %
-% 发布端怎么摆：update.json 放仓库根目录（就几行文本）；PFC_Installer.exe 作为
-% GitHub Release 附件上传（不提交进仓库，免得每发一版给 git 历史永久加约 3 MB）。
-% 清单里的 url 写 release 的稳定地址，发新版本时不用改：
-%     https://github.com/<用户>/<仓库>/releases/latest/download/PFC_Installer.exe
+% 发布端怎么摆：update.json 放仓库根目录（就几行文本）；安装包作为 GitHub Release
+% 附件上传（不提交进仓库，免得每发一版给 git 历史永久加约 3 MB）。文件名与清单 url
+% 都由 pfc_installer_asset 按版本生成，直接调 pfc_release 发版即可：
+%     https://github.com/<用户>/<仓库>/releases/download/v0.2.0/PFC_Installer_v0.2.0.exe
 %
 % 注意：私有仓库的 raw 链接需要 access token，本模块不带鉴权，所以更新源得是公开仓库。
 %
 % 清单格式（url 可写相对清单的路径，或任意完整地址）：
 %   {
 %     "version": "0.2.0",
-%     "url":     "https://github.com/me/pfc/releases/latest/download/PFC_Installer.exe",
+%     "url":     "https://github.com/me/pfc/releases/download/v0.2.0/PFC_Installer_v0.2.0.exe",
 %     "notes":   "修复 XXX；新增仪器自动扫描"
 %   }
 %
@@ -49,10 +47,6 @@ switch lower(char(cmd))
         varargout{1} = do_apply(varargin{:});
     case 'source'
         varargout{1} = read_source();
-    case 'set_source'
-        varargout{1} = do_set_source(varargin{:});
-    case 'clear_source'
-        do_clear_source();
     case 'file'
         varargout{1} = source_file();
     case 'manifest'
@@ -111,42 +105,6 @@ function tf = is_source_disabled(v)
 tf = isempty(v) || any(strcmpi(v, {'none', 'off', 'disabled', '-'}));
 end
 
-function s = do_set_source(varargin)
-s = '';
-if nargin >= 1 && ~isempty(varargin{1})
-    s = strtrim(char(string(varargin{1})));
-else
-    d = inputdlg( ...
-        {'更新源地址（HTTPS 网址，或局域网共享上的 update.json 路径）'}, ...
-        '设置更新源 / Update source', [1 72], {read_source()});
-    if isempty(d)
-        return;
-    end
-    s = strtrim(d{1});
-end
-if isempty(s)
-    return;
-end
-f = source_file();
-fid = fopen(f, 'w');
-if fid < 0
-    error('pfc:update:write', '无法写入更新配置文件：%s', f);
-end
-fprintf(fid, ['# PFC 更新源：本地覆盖，不入 git。\n' ...
-    '# 没有这个文件时用代码内置的默认源（pfc_update.m 里的 default_source）。\n' ...
-    '# 写成空值或 none 可关闭更新检查；改用内网/共享盘就换成对应 update.json 地址。\n' ...
-    'source=%s\n'], s);
-fclose(fid);
-end
-
-function do_clear_source()
-% 删掉本地覆盖 → 回到代码内置的默认源（注意：不是"关闭更新检查"）
-f = source_file();
-if isfile(f)
-    delete(f);
-end
-end
-
 % ---------------------------------------------------------------- 检查更新
 
 function info = do_check()
@@ -157,8 +115,7 @@ info = struct('ok', false, 'available', false, ...
 src = read_source();
 info.source = src;
 if isempty(src)
-    info.error = sprintf(['更新检查已被关闭（%s 里的 source 是空值或 none）。\n' ...
-        '删掉这个文件即回到默认源，或点「设置更新源」另填一个。'], source_file());
+    info.error = '更新检查已关闭。';
     return;
 end
 
@@ -267,14 +224,16 @@ u = sprintf('%s%s_pfc=%.3f', u, sep, posixtime(datetime('now')));
 end
 
 function s = http_error_hint(msg)
-%HTTP_ERROR_HINT 给 HTTP 报错补上最常见的排查方向（原始报错看不出这些）。
+%HTTP_ERROR_HINT 把底层报错翻译成人话。
+% 界面上不暴露更新源地址与配置文件：用户只要知道是「网络不通」还是「服务器上没这个清单」，
+% 技术细节附在括号里，方便排查但不干扰。
 msg = regexprep(msg, '[?&]_pfc=[\d.]+', '');   % 抹掉内部加的缓存参数，别让用户以为自己写错了
-s = ['读取更新清单失败：' msg];
 if contains(msg, '404')
-    s = [s, newline, ...
-        '  常见原因：① 更新源指向了私有仓库 —— raw 链接需要 token，本工具不带鉴权，', ...
-        newline, ...
-        '              请改成公开仓库；② 仓库/分支/文件名拼错，或文件还没 push 上去。'];
+    s = sprintf(['更新服务器上找不到更新清单，请稍后重试。\n' ...
+        '（若持续出现，请联系维护人员。）']);
+else
+    s = sprintf(['无法连接更新服务器，请确认本机可以访问外网后重试。\n' ...
+        '（技术细节：%s）'], msg);
 end
 end
 
@@ -336,8 +295,8 @@ end
 end
 
 function tf = launch_installer(path)
-% 延迟 2 秒再启动：给本程序留出退出的时间。正在运行的 exe 不能被覆盖，
-% 所以调用方应当提示用户先关闭程序（或直接退出），安装器才装得进去。
+% 延迟 5 秒再启动：给本程序留出退出的时间（调用方下完包就会自己关窗）。
+% 正在运行的 exe 不能被覆盖 —— 安装器起得太早会替换不掉主程序，装完还是旧版。
 tf = false;
 if ispc
     dirp = fileparts(path);
@@ -350,7 +309,7 @@ if ispc
         return;
     end
     fprintf(fid, '@echo off\r\n');
-    fprintf(fid, 'timeout /t 2 /nobreak >nul\r\n');
+    fprintf(fid, 'timeout /t 5 /nobreak >nul\r\n');
     fprintf(fid, 'start "" "%s"\r\n', path);
     fclose(fid);
     try

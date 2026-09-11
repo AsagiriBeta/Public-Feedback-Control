@@ -16,8 +16,9 @@ function info = pfc_release(varargin)
 %
 % 为什么安装包走 Release 附件而不是提交进仓库：安装包约 3 MB，提交进仓库会永久留在
 % git 历史里、每次 clone 都得拉。Release 附件由 gh 自动上传，仓库只多一个几行的清单。
-% 目标机读的是 releases/latest/download/<文件名> 这个稳定地址 —— 它永远指向最新
-% Release 的同名附件，所以发新版时清单里只有 version 和 notes 需要改。
+% 目标机清单里的 url 是 releases/download/v<版本>/PFC_Installer_v<版本>.exe：永久有效，
+% 文件名又带版本号便于区分。version 与 url 都由 pfc_installer_asset 按当前版本重算，
+% 不会出现「包是新的、清单还指着旧的」。
 root = fileparts(mfilename('fullpath'));
 if isempty(root)
     root = pwd;
@@ -38,13 +39,13 @@ if ~gitOk
 end
 fprintf('使用 %s\n', strtrim(gitVer));
 
-installerName = 'PFC_Installer.exe';
-installer = fullfile(root, 'build', installerName);
+asset = pfc_installer_asset(ver);
+installer = fullfile(root, 'build', asset.name);
 manifest = fullfile(root, 'update.json');
 
 % ---- 前置：仓库来源与 gh 登录（dryrun 跳过，便于离线只验证打包）----
 gh = '';
-slug = remote_slug(root);
+slug = pfc_installer_asset('slug');   % 与安装包命名共用同一处 remote 解析
 if ~dryRun
     gh = gh_exe();
     % 把 gh 所在目录塞进 PATH：这样凭据助手可以直接写 `gh`。否则路径里的空格会被
@@ -95,13 +96,10 @@ if isempty(notes) || contains(notes, '发版时补更新说明')
     fprintf('提示：这一版还没有更新说明，Release 里会写「%s」。\n', notes);
     fprintf('      下次可以用 pfc_release(''notes'', ''…'') 指定。\n');
 end
-url = sprintf('https://github.com/%s/releases/latest/download/%s', slug, installerName);
-if isempty(slug)
-    url = prev.url;
-    if isempty(url)
-        url = installerName;
-    end
-end
+% url 直接用 asset 算出来的：releases/download/v<版本>/PFC_Installer_v<版本>.exe。
+% 不用 releases/latest —— 文件名带版本号后，latest 会指向不存在的旧文件名。
+% asset 在拿不到 git remote 时退化成相对文件名，但上面已经确认过 slug 非空。
+url = asset.url;
 write_manifest(manifest, ver, url, notes);
 fprintf('清单：%s\n  version=%s\n  url=%s\n  notes=%s\n', manifest, ver, url, notes);
 
@@ -241,18 +239,6 @@ if fid < 0
 end
 fwrite(fid, jsonencode(m));
 fclose(fid);
-end
-
-function slug = remote_slug(root)
-slug = '';
-[ok, url] = run_git(root, 'remote get-url origin');
-if ~ok
-    return;
-end
-m = regexp(strtrim(url), 'github\.com[:/]+([^/]+)/(.+?)(\.git)?$', 'tokens', 'once');
-if ~isempty(m)
-    slug = sprintf('%s/%s', m{1}, m{2});
-end
 end
 
 function br = default_branch(root)

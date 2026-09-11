@@ -588,7 +588,7 @@ end
 pfc_instr_dialog();
 
 
-% --- 检查更新：读更新清单，有新版本则下载并启动安装程序 ---
+% --- 检查更新：只有两种结果 —— 有更新 / 已是最新。更新源对用户透明，无可配置项 ---
 function CheckUpdate_Callback(hObject, eventdata, handles) %#ok<INUSL>
 if pfc_visa('is_busy')
     warndlg('采集进行中，请先 STOP。', 'PFC');
@@ -596,33 +596,21 @@ if pfc_visa('is_busy')
 end
 info = pfc_update('check');
 if ~info.ok
-    sel = questdlg(sprintf('%s\n\n现在设置更新源吗？', info.error), ...
-        '检查更新', '设置更新源', '取消', '设置更新源');
-    if strcmp(sel, '设置更新源')
-        try
-            pfc_update('set_source');
-        catch err
-            errordlg(err.message, '检查更新');
-            return;
-        end
-        msgbox('更新源已保存。请再点一次「检查更新」。', '检查更新');
-    end
+    errordlg(info.error, '检查更新');
     return;
 end
 if ~info.available
-    msgbox(sprintf('已是最新版本  v%s\n\n更新源：%s', info.current, info.source), ...
-        '检查更新');
+    msgbox(sprintf('已是最新版本  v%s', info.current), '检查更新');
     return;
 end
 notes = info.notes;
 if isempty(notes)
-    notes = '（更新清单未提供说明）';
+    notes = '（本版未提供说明）';
 end
 q = sprintf(['发现新版本  v%s（当前 v%s）\n\n%s\n\n' ...
-    '下载后会自动启动安装程序；安装期间本程序需处于关闭状态。\n是否现在下载？'], ...
-    info.latest, info.current, notes);
-sel = questdlg(q, '检查更新', '下载并安装', '稍后', '稍后');
-if ~strcmp(sel, '下载并安装')
+    '点「下载并安装」后，程序会下载安装包，然后自动关闭并启动安装程序。\n' ...
+    '装好后从开始菜单重新打开即可。'], info.latest, info.current, notes);
+if ~strcmp(questdlg(q, '检查更新', '下载并安装', '稍后', '稍后'), '下载并安装')
     return;
 end
 out = pfc_update('apply', info);
@@ -630,10 +618,13 @@ if ~out.ok
     errordlg(out.error, '检查更新');
     return;
 end
-msgbox(sprintf(['更新包已就绪：\n%s\n\n' ...
-    '安装程序将在约 2 秒后自动启动。\n' ...
-    '请先关闭本程序，否则安装程序无法替换正在运行的文件。'], out.file), ...
-    '检查更新');
+% 安装程序要替换正在使用的 pfc_app.exe，本程序必须先退出 —— 让用户自己记得关很容易漏，
+% 这里直接正常关窗（走 CloseRequestFcn，参数照常存盘）；launch_installer 里留了几秒延迟
+% 等本进程退出，安装程序再接手。
+fig = ancestor(hObject, 'figure');
+if ~isempty(fig)
+    pfc_gui_close(fig);
+end
 
 
 function OneshotFFT_Callback(hObject, eventdata, handles) %#ok<INUSL>
