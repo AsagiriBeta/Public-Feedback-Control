@@ -3,26 +3,28 @@ function varargout = pfc_update(cmd, varargin)
 %
 %   info = pfc_update('check')        读更新清单，跟当前版本比
 %          pfc_update('apply', info)  下载更新包并启动安装程序（装完即新版本）
-%   s    = pfc_update('source')       当前更新源（空串表示未配置）
+%   s    = pfc_update('source')       当前生效的更新源
 %          pfc_update('set_source')   弹框让用户填更新源
 %          pfc_update('set_source', s) 直接设置
-%          pfc_update('clear_source') 清除更新源（关闭更新检查）
+%          pfc_update('clear_source') 删掉本地覆盖，回到代码内置的默认源
 %   f    = pfc_update('file')         更新源配置文件路径
 %
-% ── GitHub 用法（推荐：不用自己搭服务器）────────────────────────────
-%   1) 建一个**公开**仓库，把 update.json 放进去；
-%   2) 把 PFC_Installer.exe 作为 Release 附件上传（不用提交进仓库，免得仓库越滚越大）；
-%   3) 清单里 url 写 release 的稳定地址，这个地址发新版本时**不用改**：
-%        https://github.com/<用户>/<仓库>/releases/latest/download/PFC_Installer.exe
+% ── 更新源 ──────────────────────────────────────────────────────────
+% **默认源就是本项目在 GitHub 上的发布仓库**（写死在 default_source() 里），
+% 所以目标机装上就能直接「检查更新」，不用先手工配一遍：
+%     https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 %
-%   更新源就填这个文件的 raw 地址：
-%        https://raw.githubusercontent.com/<用户>/<仓库>/main/update.json
+% 要换源就在 <工作根>/pfc_update.ini 里覆盖（和 rigol_config.ini 一个套路）：
+%     source=https://example.com/pfc/update.json    任意 HTTPS（Gitee、内网服务器同理）
+%     source=\\server\share\pfc\update.json         局域网共享，目标机不必上网
+%     source=none                                   关闭更新检查
 %
-%   注意：私有仓库的 raw 链接需要 access token，本模块不带鉴权，所以更新源得是公开仓库。
+% 发布端怎么摆：update.json 放仓库根目录（就几行文本）；PFC_Installer.exe 作为
+% GitHub Release 附件上传（不提交进仓库，免得每发一版给 git 历史永久加约 3 MB）。
+% 清单里的 url 写 release 的稳定地址，发新版本时不用改：
+%     https://github.com/<用户>/<仓库>/releases/latest/download/PFC_Installer.exe
 %
-% ── 其它更新源 ──────────────────────────────────────────────────────
-%   https://example.com/pfc/update.json    任意 HTTPS（Gitee、内网服务器同理）
-%   \\server\share\pfc\update.json         局域网共享，目标机不必上网
+% 注意：私有仓库的 raw 链接需要 access token，本模块不带鉴权，所以更新源得是公开仓库。
 %
 % 清单格式（url 可写相对清单的路径，或任意完整地址）：
 %   {
@@ -31,8 +33,8 @@ function varargout = pfc_update(cmd, varargin)
 %     "notes":   "修复 XXX；新增仪器自动扫描"
 %   }
 %
-% 更新源存在 <工作根>/pfc_update.ini，跟 rigol_config.ini 一样是纯文本、不入库。
-% 删掉该文件即关闭更新检查。
+% 更新源配置在 <工作根>/pfc_update.ini，跟 rigol_config.ini 一样是纯文本、不入库；
+% 没有该文件就用 default_source() 里的默认源。发版流程见 README「软件更新」与 pfc_release。
 %
 % 安全性说明：本模块只做「下载 + 启动安装程序」，不做静默覆盖也不会自动执行命令。
 % 装不装由用户在弹窗里确认；安装包来源由更新源决定，请把更新源指向自己受控的仓库。
@@ -66,9 +68,19 @@ function f = source_file()
 f = fullfile(pfc_root(), 'pfc_update.ini');
 end
 
+function s = default_source()
+%DEFAULT_SOURCE 出厂默认更新源 —— 本项目在 GitHub 上的发布仓库。
+% 换仓库、换镜像只改这一处。想改用内网服务器 / 局域网共享，就在
+% <工作根>/pfc_update.ini 里写 source=… 覆盖（和 rigol_config.ini 一个套路）。
+s = 'https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json';
+end
+
 function s = read_source()
-% 只认白名单键 source，避免配置文件被改坏后影响行为
-s = '';
+%READ_SOURCE 本地覆盖优先；没有配置文件就用默认源。
+% 这样目标机装上就能直接「检查更新」，不必先手工配一遍 —— 默认源写在
+% default_source() 里，跟 rigol_config「默认值 + 本地覆盖」保持一致。
+% 只认白名单键 source；写成空值或 none/off 可显式关闭更新检查。
+s = default_source();
 f = source_file();
 if ~isfile(f)
     return;
@@ -85,9 +97,18 @@ for i = 1:numel(lines)
     end
     p = strsplit(ln, '=', 'CollapseDelimiters', false);
     if numel(p) >= 2 && strcmpi(strtrim(p{1}), 'source')
-        s = strtrim(strjoin(p(2:end), '='));
+        v = strtrim(strjoin(p(2:end), '='));
+        if is_source_disabled(v)
+            s = '';
+        elseif ~isempty(v)
+            s = v;
+        end
     end
 end
+end
+
+function tf = is_source_disabled(v)
+tf = isempty(v) || any(strcmpi(v, {'none', 'off', 'disabled', '-'}));
 end
 
 function s = do_set_source(varargin)
@@ -111,13 +132,15 @@ fid = fopen(f, 'w');
 if fid < 0
     error('pfc:update:write', '无法写入更新配置文件：%s', f);
 end
-fprintf(fid, ['# PFC 更新源（本地覆盖，不入 git）\n' ...
-    '# 指向服务端或共享盘上的 update.json；删除本文件即关闭更新检查。\n' ...
+fprintf(fid, ['# PFC 更新源：本地覆盖，不入 git。\n' ...
+    '# 没有这个文件时用代码内置的默认源（pfc_update.m 里的 default_source）。\n' ...
+    '# 写成空值或 none 可关闭更新检查；改用内网/共享盘就换成对应 update.json 地址。\n' ...
     'source=%s\n'], s);
 fclose(fid);
 end
 
 function do_clear_source()
+% 删掉本地覆盖 → 回到代码内置的默认源（注意：不是"关闭更新检查"）
 f = source_file();
 if isfile(f)
     delete(f);
@@ -134,8 +157,8 @@ info = struct('ok', false, 'available', false, ...
 src = read_source();
 info.source = src;
 if isempty(src)
-    info.error = sprintf(['未配置更新源。\n' ...
-        '点「设置更新源」，填入服务器或共享盘上的 update.json 地址。']);
+    info.error = sprintf(['更新检查已被关闭（%s 里的 source 是空值或 none）。\n' ...
+        '删掉这个文件即回到默认源，或点「设置更新源」另填一个。'], source_file());
     return;
 end
 

@@ -157,29 +157,38 @@ MATLAB Runtime，装完桌面/开始菜单就有图标，之后点击即用 —�
 
 ### 怎么工作
 
-1. 读 `<工作根>/pfc_update.ini` 里的 `source`（更新源）；
+1. 取更新源（默认写死在程序里，见下；本地配置文件可覆盖）；
 2. 拉取该地址的**更新清单**（JSON），与 `pfc_version()` 比较版本；
 3. 有新版就弹窗问一句，确认后把安装包下载到临时目录并**启动安装程序**；
 4. 安装程序要替换程序文件，所以会先提示你关掉本程序。
 
-首次点「检查更新」若提示未配置更新源，跟着弹窗填地址即可。
-
 ### 更新源
 
-本项目的更新源就是 GitHub 仓库，目标机填这一条（**只填一次**）：
+**默认源已经写死在程序里**（`pfc_update.m` 的 `default_source()`），指向本仓库：
 
 ```
-source=https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
+https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 ```
+
+所以目标机**装上就能直接点「检查更新」，不用先配一遍**。
 
 | 内容 | 放哪 |
 |------|------|
 | `update.json` | 仓库根目录（就几行文本，跟着源码走） |
 | `PFC_Installer.exe` | **GitHub Release 附件**（不提交进仓库，否则每发一版都给 git 历史永久增加约 3 MB） |
 
+要换源就在 `<工作根>/pfc_update.ini` 里覆盖，和 `rigol_config.ini` 一个套路：
+
+```
+source=https://example.com/pfc/update.json     # 任意 HTTPS，Gitee / 内网服务器同理
+source=\\server\share\pfc\update.json          # 局域网共享，目标机不必上网
+source=none                                    # 关闭更新检查
+```
+
+删掉该文件即回到默认源（注意是**回到默认**，不是关闭）。
+
 > 更新源必须是**公开**仓库：私有仓库的 raw 链接需要 access token，程序不带鉴权，会返回 404
-> （报错里会提示这一条）。想改用内网服务器或局域网共享也行，把 `source` 换成对应地址即可，
-> 机制完全一样。
+> （报错里会提示这一条）。
 
 ### 更新清单格式
 
