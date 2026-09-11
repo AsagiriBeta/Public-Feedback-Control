@@ -166,31 +166,54 @@ MATLAB Runtime，装完桌面/开始菜单就有图标，之后点击即用 —�
 
 ### 更新源
 
-两种写法都支持，目标机不必上外网：
+本项目的更新源就是 GitHub 仓库，目标机填这一条（**只填一次**）：
 
 ```
-source=https://your-server/pfc/update.json      # 内网 HTTP 服务
-source=\\nas\share\pfc\update.json              # 局域网共享
+source=https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 ```
+
+| 内容 | 放哪 |
+|------|------|
+| `update.json` | 仓库根目录（就几行文本，跟着源码走） |
+| `PFC_Installer.exe` | **GitHub Release 附件**（不提交进仓库，否则每发一版都给 git 历史永久增加约 3 MB） |
+
+> 更新源必须是**公开**仓库：私有仓库的 raw 链接需要 access token，程序不带鉴权，会返回 404
+> （报错里会提示这一条）。想改用内网服务器或局域网共享也行，把 `source` 换成对应地址即可，
+> 机制完全一样。
 
 ### 更新清单格式
+
+`url` 指向 Release 的固定地址 —— 它**永远指向最新 Release 的同名附件**，所以发新版时
+`url` 不用改，只有 `version` 和 `notes` 会变：
 
 ```json
 {
   "version": "0.2.0",
-  "url": "PFC_Installer.exe",
+  "url": "https://github.com/AsagiriBeta/Public-Feedback-Control/releases/latest/download/PFC_Installer.exe",
   "notes": "新增仪器自动扫描；修复 XXX"
 }
 ```
 
-`url` 写相对路径时按清单所在目录解析，所以把整个发布目录（`update.json` + `PFC_Installer.exe`）
-一起丢到服务器或共享盘即可，换机器不用改。
-
 ### 发版流程
 
-1. 改 `pfc_version.m` 里的版本号（唯一出处）；
-2. `pfc_build_exe` 出新的 `PFC_Installer.exe`；
-3. 把新的 `update.json`（`version` 改成新号）与 `PFC_Installer.exe` 覆盖到更新源目录。
+**只需改 `pfc_version.m` 里的版本号，然后跑一条命令：**
+
+```matlab
+pfc_version                            % 看一眼当前版本
+pfc_release                            % 打包 → 建 v<版本> Release 并上传安装包 → 推送清单
+pfc_release('notes', '这一版改了什么')   % 顺手写更新说明
+```
+
+`pfc_release` 会自动：校验版本号（tag 已存在就拒绝，防重复发版）→ 打包 → 建 `v<版本>`
+的 Release 并上传安装包 → 提交并推送 `update.json`。清单里的 `version` 直接取自
+`pfc_version()`，所以不会出现「包是新的、清单还是旧的」。
+
+前置条件（各一次）：
+
+1. 编译机装 **gh**（GitHub CLI）并登录：`gh auth login`；
+2. 配好 git 身份，否则提交会报 `Author identity unknown`：
+   `git config --global user.name "…"` 与 `git config --global user.email "…"`；
+3. 网络到不了 GitHub 时给 git 配代理：`git config --global http.proxy http://127.0.0.1:7890`。
 
 程序只做「下载 + 启动安装程序」，不会静默覆盖文件；装不装由用户在弹窗里确认。
 
