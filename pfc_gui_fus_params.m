@@ -1,11 +1,13 @@
 function p = pfc_gui_fus_params(handles)
 %PFC_GUI_FUS_PARAMS 读「2. 超声 / 反馈 / PCD」参数并做基本校验。
-p.freq_mhz = num_from(handles, 'frequency', 1.5);
-p.volt_mVpp = num_from(handles, 'voltage', 1);
-p.prf_hz = num_from(handles, 'PRF', 2);
+% 频率/电压/PRF/时长是必填项：读不到有效数值时返回 NaN（而不是静默兜底），
+% 让下面的校验报错；否则清空电压框会静默变成 1 mVpp 直接开超声。
+p.freq_mhz = num_required(handles, 'frequency');
+p.volt_mVpp = num_required(handles, 'voltage');
+p.prf_hz = num_required(handles, 'PRF');
 p.n_cycle = max(1, round(num_from(handles, 'BurstCount', 400)));
 p.n_cycle = min(p.n_cycle, 5000);
-p.duration_s = num_from(handles, 'duration', 20);
+p.duration_s = num_required(handles, 'duration');
 p.npts = max(4096, round(num_from(handles, 'sampleNum', 40000)));
 p.npts = min(p.npts, 50000);
 p.target_db = num_from(handles, 'ControllerTarget', 2);
@@ -54,5 +56,13 @@ if isfield(handles, tag) && isgraphics(handles.(tag))
     if isfinite(x)
         v = x;
     end
+end
+end
+
+function v = num_required(handles, tag)
+%NUM_REQUIRED 必填数字框：缺失/空/非法一律返回 NaN，交由调用方报错。
+v = NaN;
+if isfield(handles, tag) && isgraphics(handles.(tag))
+    v = str2double(strtrim(char(get(handles.(tag), 'String'))));
 end
 end

@@ -3,6 +3,7 @@ function varargout = pfc_visa(cmd, varargin)
 %  scope = pfc_visa('scope')
 %  fgen  = pfc_visa('fgen')
 %  pfc_visa('rf_off')
+%  pfc_visa('close')       % 断开当前连接（改了 VISA 地址后调用，下次采集重连）
 %  pfc_visa('reset_busy')
 %  tf    = pfc_visa('is_busy')
 %  ok    = pfc_visa('try_busy')     % 抢到运行权为 true
@@ -32,6 +33,11 @@ switch lower(cmd)
             end
         catch
         end
+    case 'close'
+        pfc_visa_state.scope = [];
+        pfc_visa_state.fgen = [];
+        pfc_visa_state.busy = false;
+        clear global fgen
     case 'is_busy'
         varargout{1} = logical(pfc_visa_state.busy);
     case 'try_busy'
@@ -94,7 +100,9 @@ end
 if ~isempty(lastErr)
     rethrow(lastErr);
 end
-error('pfc_visa:open', '无法打开 %s', addr);
+error('pfc_visa:open', ...
+    ['无法打开 %s\n请在界面「仪器设置」中确认 VISA 地址（配置文件：%s）'], ...
+    addr, rigol_instr_config('file'));
 end
 
 function cands = visa_candidates(addr)

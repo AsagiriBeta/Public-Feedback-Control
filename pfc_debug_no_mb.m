@@ -15,7 +15,7 @@ global pfc_abort fgen
 pfc_abort = false;
 liveStop = onCleanup(@() pfc_debug_live('stop')); %#ok<NASGU>
 
-outdir = fullfile(fileparts(mfilename('fullpath')), 'data');
+outdir = fullfile(pfc_root(), 'data');
 if isfield(opts, 'outdir') && ~isempty(opts.outdir)
     outdir = opts.outdir;
 end

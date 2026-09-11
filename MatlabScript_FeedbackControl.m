@@ -56,15 +56,17 @@ handles.output = hObject;
 
 % Update handles structure
 guidata(hObject, handles);
-root = fileparts(mfilename('fullpath'));
-addpath(root);
-addpath(fullfile(root, 'rigol'));
+if ~isdeployed
+    root = fileparts(mfilename('fullpath'));
+    addpath(root);
+    addpath(fullfile(root, 'rigol'));
+end
 try
     pfc_apply_gui_layout(hObject);
 catch err
     warning('PFC:Layout', '界面布局未应用：%s', err.message);
 end
-defdir = fullfile(root, 'data');
+defdir = fullfile(pfc_root(), 'data');
 curdir = strtrim(char(get(handles.directory, 'String')));
 if isempty(curdir) || ~isfolder(curdir)
     if ~isfolder(defdir)
@@ -87,7 +89,15 @@ end
 pfc_visa('reset_busy');
 handles = guihandles(hObject);
 handles.output = hObject;
+% 恢复上次保存的参数（存档不存在则保持当前默认值）
+try
+    pfc_gui_params('apply', handles);
+catch err
+    warning('PFC:Prefs', '参数恢复失败：%s', err.message);
+end
 guidata(hObject, handles);
+% 关闭窗口时先把参数存盘
+set(hObject, 'CloseRequestFcn', @(src, ~) pfc_gui_close(src));
 set(hObject, 'Visible', 'on');
 movegui(hObject, 'onscreen');
 
@@ -246,8 +256,17 @@ function Choose_file_Callback(hObject, eventdata, handles)
 % hObject    handle to Choose_file (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-folder_name = uigetdir;
+cur = strtrim(char(get(handles.directory,'String')));
+if isempty(cur) || ~isfolder(cur)
+    cur = pwd;
+end
+folder_name = uigetdir(cur, '选择保存目录 / Choose save folder');
+% uigetdir 取消时返回 0；此时保持原目录，否则会被写成字符串 "0" 并新建 ./0 目录。
+if ~ischar(folder_name) || isempty(folder_name)
+    return;
+end
 set(handles.directory,'String',folder_name);
+try, pfc_gui_params('save', handles); catch, end
 %check_save_ready(hObject, handles);
 guidata(hObject,handles);
 
@@ -536,32 +555,10 @@ function stop_Callback(hObject, eventdata, handles)
 % hObject    handle to stop (see GCBO)
 % eventdata  reserved - to be defined in a future version of MATLAB
 % handles    structure with handles and user data (see GUIDATA)
-global fgen pfc_abort
+global pfc_abort
 pfc_abort = true;
 pfc_visa('rf_off');
 
-
-
-function edit40_Callback(hObject, eventdata, handles)
-% hObject    handle to edit40 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    structure with handles and user data (see GUIDATA)
-
-% Hints: get(hObject,'String') returns contents of edit40 as text
-%        str2double(get(hObject,'String')) returns contents of edit40 as a double
-
-
-% --- Executes during object creation, after setting all properties.
-function edit40_CreateFcn(hObject, eventdata, handles)
-% hObject    handle to edit40 (see GCBO)
-% eventdata  reserved - to be defined in a future version of MATLAB
-% handles    empty - handles not created until after all CreateFcns called
-
-% Hint: edit controls usually have a white background on Windows.
-%       See ISPC and COMPUTER.
-if ispc && isequal(get(hObject,'BackgroundColor'), get(0,'defaultUicontrolBackgroundColor'))
-    set(hObject,'BackgroundColor','white');
-end
 
 
 % --- Executes on button press in IniFgen.
@@ -580,6 +577,39 @@ try
 catch err
     errordlg(err.message, '初始化信号源');
 end
+
+
+% --- 仪器设置：编辑 VISA 地址（打包成 exe 后无需改代码即可换仪器） ---
+function InstrSetup_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if pfc_visa('is_busy')
+    warndlg('采集进行中，请先 STOP。', 'PFC');
+    return;
+end
+cfg = rigol_instr_config();
+d = inputdlg( ...
+    {'示波器 VISA 地址（DHO814）', '信号源 VISA 地址（DG2052）'}, ...
+    '仪器设置 / Instruments', [1 64; 1 64], ...
+    {char(cfg.scope_visa), char(cfg.awg_visa)});
+if isempty(d)
+    return;
+end
+s1 = strtrim(d{1});
+s2 = strtrim(d{2});
+if isempty(s1) || isempty(s2)
+    errordlg('VISA 地址不能为空。', 'PFC');
+    return;
+end
+cfg.scope_visa = s1;
+cfg.awg_visa = s2;
+try
+    rigol_instr_config('save', cfg);
+    pfc_visa('close');   % 释放旧连接，下次采集按新地址重连
+catch err
+    errordlg(err.message, '仪器设置');
+    return;
+end
+msgbox(sprintf('已保存到：\n%s\n\n下次采集将按新地址连接。', rigol_instr_config('file')), ...
+    '仪器设置');
 
 
 function OneshotFFT_Callback(hObject, eventdata, handles) %#ok<INUSL>

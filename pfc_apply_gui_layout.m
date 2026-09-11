@@ -18,7 +18,7 @@ set(fig, 'Units', 'pixels');
 fp = get(fig, 'Position');
 W = fp(3); H = fp(4);
 
-L = 18; LW = 520; G = 5; top_clear = 56; bot = 14;
+L = 18; LW = 520; G = 8; top_clear = 56; bot = 14;
 file_h = 88; acq_h = 118; fus_h = 154; pcd_h = 112; fb_h = 132;
 
 mot = getp(fig,'motor_controls');
@@ -71,21 +71,26 @@ style_panel(acq, C, '1.  CH1 回读 / Readback · FFT');
 style_panel(getp(fig,'uibuttongroup2'), C, '超声参数（2 / 3 / 4 共用）');
 style_panel(getp(fig,'uibuttongroup4'), C, '2–3.  开环 CH2');
 style_panel(getp(fig,'uibuttongroup3'), C, '4.  闭环反馈 / Feedback');
-style_panel(getp(fig,'uibuttongroup5'), C, '实时 / Realtime');
+style_panel(getp(fig,'uibuttongroup5'), C, '实时  Realtime');
 
 % --- file ---
 f1 = getp(fig,'uibuttongroup1');
+ensure_instr(fig, f1);
 labw = 118; editx = 14+labw+8; editw = LW - editx - 14;
 id_y = max(44, file_h - 54);
 place(getp(f1,'text42'), 14, id_y + 4, labw, 22);
 place(getp(f1,'studyID'), editx, id_y, editw, 26);
-place(getp(f1,'Choose_file'), 14, 10, labw, 26);
-place(getp(f1,'directory'), editx, 10, editw, 26);
+bw = 92;
+place(getp(f1,'Choose_file'), 14, 10, bw, 26);
+place(getp(f1,'InstrSetup'), 14 + bw + 8, 10, bw, 26);
+dx = 14 + bw + 8 + bw + 8;
+place(getp(f1,'directory'), dx, 10, LW - dx - 14, 26);
 style_label(getp(f1,'text42'), C, '文件名  ID');
 style_edit(getp(f1,'studyID'), C);
 style_edit(getp(f1,'directory'), C);
 set(getp(f1,'directory'), 'FontSize', 10);
-style_btn(getp(f1,'Choose_file'), C, '浏览  Browse');
+square_btn(getp(f1,'Choose_file'), C, '浏览  Browse', C.btn2);
+square_btn(getp(f1,'InstrSetup'), C, '仪器设置', C.btn2);
 
 % --- shared FUS params (stages 2–4) ---
 f2 = getp(fig,'uibuttongroup2');
@@ -115,7 +120,7 @@ pair(f3, 'text53','ControllerTarget','text54', 14, xE, xU, 86, lw, ew, uw, C, '�
 pair(f3, 'text55','MaxV','text56',             14, xE, xU, 52, lw, ew, uw, C, '闭环上限  Max V', 'mVpp');
 set(getp(fig,'Sonication'), 'Parent', f3);
 place(getp(f3,'Sonication'), 14, 8, LW-28, 36);
-style_btn(getp(f3,'Sonication'), C, '4. 开始闭环  Feedback');
+square_btn(getp(f3,'Sonication'), C, '4. 开始闭环  Feedback');
 
 % --- stages 2–3 open-loop CH2 ---
 f4 = getp(fig,'uibuttongroup4');
@@ -130,23 +135,27 @@ end
 bw = floor((LW - 28 - 8) / 2);
 place(getp(f4,'PCDcontrol'), 14, 8, bw, 36);
 place(getp(f4,'OpenMB'), 14 + bw + 8, 8, bw, 36);
-style_btn(getp(f4,'PCDcontrol'), C, '2. 无微泡');
-style_btn(getp(f4,'OpenMB'), C, '3. 有微泡开环');
+square_btn(getp(f4,'PCDcontrol'), C, '2. 无微泡');
+square_btn(getp(f4,'OpenMB'), C, '3. 有微泡开环');
 
 % --- stage 1 ---
-style_btn(getp(acq,'OneshotFFT'), C, '单次  One-shot');
-style_btn(getp(acq,'DebugRun'), C, '连续调试  Debug');
+square_btn(getp(acq,'OneshotFFT'), C, '单次  One-shot');
+square_btn(getp(acq,'DebugRun'), C, '连续调试  Debug');
 
 % --- plots ---
 g5 = getp(fig,'uibuttongroup5');
-gap = 22;
-row_gap = 48;
-top_pad = 28;
-bot_block = 100;
-xL = 50;
+gap = 26;
+top_pad = 52;      % 净空：面板标题 + 坐标轴标题，避免“实时/Realtime”压住“时域/频谱”
+bot_block = 96;
+xL = 52;
 axw = floor((RW - xL - 16 - gap) / 2);
+row_gap = 46;
 axh = floor((RH - top_pad - bot_block - 2 * row_gap) / 3);
-axh = max(140, min(210, axh));
+if axh < 112          % 窗口偏矮时压缩行距，保证三行仍放得下
+    row_gap = max(26, floor((RH - top_pad - bot_block - 3 * 112) / 2));
+    axh = floor((RH - top_pad - bot_block - 2 * row_gap) / 3);
+end
+axh = max(96, min(axh, 200));
 xR = xL + axw + gap;
 yT = RH - top_pad - axh;
 yM = yT - row_gap - axh;
@@ -156,32 +165,39 @@ place(getp(g5,'FFT_plot'), xR, yT, axw, axh);
 place(getp(g5,'realtimeVplot'), xL, yM, axw, axh);
 place(getp(g5,'realtimeSCplot'), xR, yM, axw, axh);
 place(getp(g5,'realtimeICplot'), xL, yB, axw, axh);
-style_axes(getp(g5,'Signal_plot'), '时域  Time');
-style_axes(getp(g5,'FFT_plot'), '频谱  FFT');
-style_axes(getp(g5,'realtimeVplot'), '电压  Voltage');
-style_axes(getp(g5,'realtimeSCplot'), '稳态空化  SC · 2f (3 MHz)');
-style_axes(getp(g5,'realtimeICplot'), '惯性空化  IC · 3.3 MHz');
+style_axes(getp(g5,'Signal_plot'), C, '时域  Time');
+style_axes(getp(g5,'FFT_plot'), C, '频谱  FFT');
+style_axes(getp(g5,'realtimeVplot'), C, '电压  Voltage (mVpp)');
+style_axes(getp(g5,'realtimeSCplot'), C, '稳态空化  SC · 2f');
+style_axes(getp(g5,'realtimeICplot'), C, '惯性空化  IC · 3.3 MHz');
 
-place(getp(g5,'PulseNum'), xR, yB + axh - 38, axw, 34);
-place(getp(g5,'stop'), xR, yB, axw, 72);
+place(getp(g5,'PulseNum'), xR, yB + axh - 36, axw, 32);
+place(getp(g5,'stop'), xR, yB, axw, 68);
 style_label(getp(g5,'PulseNum'), C, '脉冲  Pulse #');
 set(getp(g5,'PulseNum'), 'HorizontalAlignment', 'center', 'FontSize', 12, ...
     'BackgroundColor', C.panel);
-st = getp(g5,'stop');
-style_btn(st, C, '停止超声  STOP FUS');
-set(st, 'BackgroundColor', C.danger, 'ForegroundColor', [1 1 1], 'FontSize', 15);
+square_btn(getp(g5,'stop'), C, '停止超声  STOP FUS', C.danger, 15);
+
+watch_params(fig);
 end
 
-function C = pfc_ui_colors()
-C.fig    = [0.11 0.12 0.14];
-C.panel  = [0.16 0.17 0.20];
-C.text   = [0.93 0.94 0.96];
-C.muted  = [0.70 0.73 0.78];
-C.editBg = [0.08 0.09 0.10];
-C.editFg = [0.95 0.96 0.97];
-C.btn    = [0.82 0.64 0.28];
-C.btnFg  = [0.10 0.10 0.10];
-C.danger = [0.70 0.22 0.22];
+function watch_params(fig)
+%WATCH_PARAMS 改完参数、焦点离开编辑框时立刻存盘，避免只在关闭时才保存。
+tags = {'frequency', 'voltage', 'PRF', 'BurstCount', 'duration', 'sampleNum', ...
+    'ControllerTarget', 'MaxV', 'MBLoadTime', 'studyID', 'directory'};
+for i = 1:numel(tags)
+    o = findobj(fig, 'Tag', tags{i}, '-depth', inf);
+    if ~isempty(o)
+        set(o(1), 'Callback', @(src, ~) pfc_gui_params('save', guidata(ancestor(src, 'figure'))));
+    end
+end
+end
+
+function edit_debug_cb(src)
+%EDIT_DEBUG_CB 调试框：运行中即时下发频率/电压，同时把最新值存盘。
+h = guidata(ancestor(src, 'figure'));
+try, pfc_debug_live('apply', h); catch, end
+try, pfc_gui_params('save', h); catch, end
 end
 
 function pair(parent, tLab, tEdit, tUnit, xL, xE, xU, y, lw, ew, uw, C, lab, unit)
@@ -214,7 +230,7 @@ else
             'Callback', @(src, ~) MatlabScript_FeedbackControl('DebugRun_Callback', src, [], guidata(fig)));
     end
 end
-cb = @(src, ~) pfc_debug_live('apply', guidata(ancestor(src, 'figure')));
+cb = @(src, ~) edit_debug_cb(src);
 ensure_txt(acq, 'debug_freq_lab');
 ensure_edit(acq, 'debug_freq', '1.5', cb);
 ensure_txt(acq, 'debug_freq_unit');
@@ -230,6 +246,17 @@ if isempty(findobj(fig, 'Tag', 'OpenMB'))
         'Callback', @(src, ~) MatlabScript_FeedbackControl('OpenMB_Callback', src, [], guidata(fig)));
 else
     set(findobj(fig, 'Tag', 'OpenMB', '-depth', inf), 'Parent', parent);
+end
+end
+
+function ensure_instr(fig, parent)
+% 「仪器设置」按钮：打包后用它改 VISA 地址，不用改源码。
+if isempty(findobj(fig, 'Tag', 'InstrSetup'))
+    uicontrol('Parent', parent, 'Style', 'pushbutton', 'Tag', 'InstrSetup', ...
+        'Units', 'pixels', ...
+        'Callback', @(src, ~) MatlabScript_FeedbackControl('InstrSetup_Callback', src, [], guidata(fig)));
+else
+    set(findobj(fig, 'Tag', 'InstrSetup', '-depth', inf), 'Parent', parent);
 end
 end
 
@@ -254,9 +281,9 @@ end
 
 function style_panel(obj, C, title)
 set(obj, 'ForegroundColor', C.text, 'BackgroundColor', C.panel, ...
-    'FontSize', 11, 'FontWeight', 'bold', 'Title', title);
+    'FontSize', 10.5, 'FontWeight', 'bold', 'Title', title);
 try
-    set(obj, 'BorderColor', [0.38 0.40 0.44]);
+    set(obj, 'BorderColor', C.border);
 catch
 end
 end
@@ -274,17 +301,46 @@ set(obj, 'BackgroundColor', C.editBg, 'ForegroundColor', C.editFg, ...
     'FontSize', 12, 'HorizontalAlignment', 'left', 'FontName', ui_font());
 end
 
-function style_btn(obj, C, str)
-set(obj, 'String', str, 'BackgroundColor', C.btn, 'ForegroundColor', C.btnFg, ...
-    'FontSize', 12, 'FontWeight', 'bold', 'FontName', ui_font());
+function square_btn(obj, C, str, face, fs)
+%SQUARE_BTN 直角按钮。macOS 原生 pushbutton 一定是圆角且无半径属性，
+% 这里用「无边框 uipanel（直角填充）+ 垂直居中文本」替换它，与直角面板统一。
+% 可点性靠 ButtonDownFcn；面/字色与回调存进 UserData 供 pfc_gui_busy 使用。
+if nargin < 4 || isempty(face)
+    face = C.btn;
+end
+if nargin < 5 || isempty(fs)
+    fs = 12;
+end
+tag = get(obj, 'Tag');
+cb  = get(obj, 'Callback');
+pos = get(obj, 'Position');
+par = get(obj, 'Parent');
+delete(obj);
+
+p = uipanel('Parent', par, 'Units', 'pixels', 'Position', pos, ...
+    'BackgroundColor', face, 'BorderType', 'none', 'Tag', tag);
+lh = min(pos(4), round(fs * 1.7));
+lab = uicontrol('Parent', p, 'Style', 'text', 'Units', 'pixels', ...
+    'Position', [1, round((pos(4) - lh) / 2), max(1, pos(3) - 2), lh], ...
+    'String', str, 'BackgroundColor', face, 'ForegroundColor', C.btnFg, ...
+    'HorizontalAlignment', 'center', 'FontSize', fs, 'FontWeight', 'bold', ...
+    'Enable', 'inactive', 'FontName', ui_font());
+set(p, 'UserData', struct('face', face, 'fg', C.btnFg, 'cb', cb, 'label', lab));
+if ~isempty(cb)
+    set(p, 'ButtonDownFcn', cb);
+    set(lab, 'ButtonDownFcn', cb);
+end
 end
 
-function style_axes(ax, ttl)
-set(ax, 'Units', 'pixels', 'Color', [0.09 0.11 0.15], 'ColorMode', 'manual', ...
-    'XColor', [0.82 0.86 0.90], 'YColor', [0.82 0.86 0.90], ...
-    'GridColor', [0.32 0.38 0.44], 'Box', 'on', 'FontSize', 9);
-title(ax, ttl, 'Color', [0.90 0.93 0.95], 'FontSize', 10, 'FontWeight', 'normal');
-xlabel(ax, '', 'Color', [0.82 0.86 0.90], 'FontSize', 9);
+function style_axes(ax, C, ttl)
+set(ax, 'Units', 'pixels', 'Color', C.axBg, 'ColorMode', 'manual', ...
+    'XColor', C.axFg, 'YColor', C.axFg, 'GridColor', C.grid, ...
+    'GridAlpha', 0.5, 'GridLineStyle', ':', 'Box', 'off', ...
+    'XGrid', 'on', 'YGrid', 'on', ...
+    'TickDir', 'out', 'TickLength', [0.012 0.012], 'FontSize', 9);
+title(ax, ttl, 'Color', C.text, 'FontSize', 10, 'FontWeight', 'normal');
+xlabel(ax, '', 'Color', C.axFg, 'FontSize', 9);
+ylabel(ax, '', 'Color', C.axFg, 'FontSize', 9);
 end
 
 function n = ui_font()

@@ -29,6 +29,9 @@ vendor-docs/
 .vscode/
 *.code-workspace
 
+# 本机仪器配置（每台机器 VISA 地址不同，不入库）
+rigol_config.ini
+
 # 若还残留 Python 构建产物
 .venv/
 __pycache__/

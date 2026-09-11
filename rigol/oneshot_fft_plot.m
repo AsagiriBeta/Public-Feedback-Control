@@ -2,8 +2,10 @@ function oneshot_fft_plot()
 %ONESHOT_FFT_PLOT 第一步：开环发一帧、收一帧，画 dB 频谱（不做反馈）。
 % 无换能器/负载时不要运行。参数与 GUI 默认一致：1.5 MHz、20 mVpp。
 thisdir = fileparts(mfilename('fullpath'));
-addpath(thisdir);
-addpath(fileparts(thisdir));
+if ~isdeployed
+    addpath(thisdir);
+    addpath(fileparts(thisdir));
+end
 cfg = rigol_instr_config();
 
 freq_mhz = 1.5;
@@ -53,8 +55,7 @@ assignin('base', 'total_PCD_data', chPcd(:).');
 assignin('base', 'oneshot_tx', chTx(:).');
 assignin('base', 'oneshot_fs', realFs);
 
-root = fileparts(fileparts(mfilename('fullpath')));
-outdir = fullfile(root, 'data');
+outdir = fullfile(pfc_root(), 'data');
 S = struct('chPcd', chPcd, 'chTx', chTx, 'realFs', realFs, 'timeIntervalNanoSeconds', dt_ns, ...
     'f_Hz', F, 'fft_dB', db, 'freq_MHz', freq_mhz, 'volt_mVpp', volt_mV);
 pfc_save_acquisition(outdir, 'oneshot_cli', S);
