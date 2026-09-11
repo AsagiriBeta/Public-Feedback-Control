@@ -47,6 +47,12 @@ gh = '';
 slug = remote_slug(root);
 if ~dryRun
     gh = gh_exe();
+    % 把 gh 所在目录塞进 PATH：这样凭据助手可以直接写 `gh`。否则路径里的空格会被
+    % git 的 ! shell 助手拆开（"C:/Program Files/GitHub CLI/gh.exe" 变成 C:/Program）。
+    if ~strcmp(gh, 'gh')
+        setenv('PATH', [fileparts(gh) pathsep getenv('PATH')]);
+        gh = 'gh';
+    end
     [ok, out] = run_cmd(sprintf('"%s" auth status', gh));
     if ~ok
         error('PFC:release:ghAuth', ...
@@ -275,7 +281,15 @@ end
 % ---------------------------------------------------------------- 底层
 
 function [ok, out] = run_git(root, args)
-[ok, out] = run_cmd(sprintf('git -C "%s" %s', root, args));
+[ok, out] = run_cmd(sprintf('git -C "%s" %s %s', root, gh_cred_args(), args));
+end
+
+function s = gh_cred_args()
+% 让 git 直接借 gh 的凭据，不依赖用户是否配过 git 凭据助手 —— 否则系统自带的
+% Git Credential Manager 会弹一个可能看不见的登录窗，把脚本卡死。
+% credential.helper= 先清空已有助手列表，再加一个只对本次命令生效的 ! 助手。
+% 这里写裸名 gh：调用方已把它所在目录加进 PATH，避免路径空格被 shell 拆开。
+s = '-c credential.helper= -c "credential.helper=!gh auth git-credential"';
 end
 
 function [ok, out] = run_cmd(cmd)
