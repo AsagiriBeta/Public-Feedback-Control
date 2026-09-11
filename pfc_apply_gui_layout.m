@@ -7,7 +7,7 @@ W = min(1580, max(1280, scr(3) - 48));
 H = min(940, max(860, scr(4) - 90));
 set(fig, 'Units', 'pixels', 'Position', [40 50 W H], ...
     'Color', C.fig, 'Resize', 'off', 'Visible', 'on', ...
-    'Name', 'PFC  ·  DHO814 / DG2052', ...
+    'Name', ['PFC  ·  DHO814 / DG2052  ·  ' pfc_version('label')], ...
     'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
 try
     set(fig, 'AutoResizeChildren', 'off');
@@ -76,10 +76,14 @@ style_panel(getp(fig,'uibuttongroup5'), C, '实时  Realtime');
 % --- file ---
 f1 = getp(fig,'uibuttongroup1');
 ensure_instr(fig, f1);
-labw = 118; editx = 14+labw+8; editw = LW - editx - 14;
+ensure_update(fig, f1);
+labw = 118; editx = 14+labw+8;
+ubw = 92;                                   % 「检查更新」摆在 ID 行右端，不挤占下面一行
+editw = LW - editx - 14 - ubw - 8;
 id_y = max(44, file_h - 54);
 place(getp(f1,'text42'), 14, id_y + 4, labw, 22);
 place(getp(f1,'studyID'), editx, id_y, editw, 26);
+place(getp(f1,'CheckUpdate'), editx + editw + 8, id_y, ubw, 26);
 bw = 92;
 place(getp(f1,'Choose_file'), 14, 10, bw, 26);
 place(getp(f1,'InstrSetup'), 14 + bw + 8, 10, bw, 26);
@@ -91,6 +95,7 @@ style_edit(getp(f1,'directory'), C);
 set(getp(f1,'directory'), 'FontSize', 10);
 square_btn(getp(f1,'Choose_file'), C, '浏览  Browse', C.btn2);
 square_btn(getp(f1,'InstrSetup'), C, '仪器设置', C.btn2);
+square_btn(getp(f1,'CheckUpdate'), C, '检查更新', C.btn2);
 
 % --- shared FUS params (stages 2–4) ---
 f2 = getp(fig,'uibuttongroup2');
@@ -257,6 +262,17 @@ if isempty(findobj(fig, 'Tag', 'InstrSetup'))
         'Callback', @(src, ~) MatlabScript_FeedbackControl('InstrSetup_Callback', src, [], guidata(fig)));
 else
     set(findobj(fig, 'Tag', 'InstrSetup', '-depth', inf), 'Parent', parent);
+end
+end
+
+function ensure_update(fig, parent)
+% 「检查更新」按钮：读更新源清单，有新版本就下载并启动安装程序。
+if isempty(findobj(fig, 'Tag', 'CheckUpdate'))
+    uicontrol('Parent', parent, 'Style', 'pushbutton', 'Tag', 'CheckUpdate', ...
+        'Units', 'pixels', ...
+        'Callback', @(src, ~) MatlabScript_FeedbackControl('CheckUpdate_Callback', src, [], guidata(fig)));
+else
+    set(findobj(fig, 'Tag', 'CheckUpdate', '-depth', inf), 'Parent', parent);
 end
 end
 

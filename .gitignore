@@ -1,41 +1,43 @@
+# ── 系统 ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 
-# MATLAB
+# ── MATLAB 编辑器临时产物 ────────────────────────────────────────────
 *.asv
 *.m~
 *.bak
 *.fig.bak
-slprj/
-*.slx.autosave
 *.autosave
+slprj/
 
-# 实验数据（.mat 大、含动物 ID；频谱导出也不入库）
+# ── 构建产物 ─────────────────────────────────────────────────────────
+# build/ 全是可再生的临时产物：安装包走 GitHub Release 附件分发，不进仓库。
+# 发布清单 update.json 放在仓库根目录（目标机按 raw 链接取它）。
+build/
+
+# ── 实验数据 ─────────────────────────────────────────────────────────
+# .mat 体积大且含动物 ID；频谱/图片/表格导出同样不入库
 data/
 *.mat
+*.csv
 *.png
 *.jpg
 *.jpeg
-*.csv
+# 若某天需要给文档配图，在这里加一行例外，例如：!docs/*.png
 
-# 厂商手册 / 论文 PDF（版权，体积大）
+# ── 厂商手册 / 论文 PDF（版权，体积大）────────────────────────────────
 *.pdf
 *.PDF
 manuals/
 vendor-docs/
 
-# 本地 / 编辑器
-.cursor/
-.vscode/
-*.code-workspace
-
-# 本机仪器配置（每台机器 VISA 地址不同，不入库）
+# ── 本机配置（每台机器的仪器地址/更新源不同，不入库）─────────────────
 rigol_config.ini
+pfc_update.ini
 
-# 若还残留 Python 构建产物
-.venv/
-__pycache__/
-*.pyc
-dist/
-build/
-*.egg-info/
+# ── 编辑器 / IDE ─────────────────────────────────────────────────────
+.vscode/
+.cursor/
+.codebuddy/
+*.code-workspace

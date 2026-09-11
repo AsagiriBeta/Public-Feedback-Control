@@ -6,6 +6,8 @@ function varargout = rigol_instr_config(cmd, newcfg)
 %         rigol_instr_config('reset')      删除本地覆盖，回到默认
 %   p   = rigol_instr_config('file')  本地覆盖文件路径
 %   d   = rigol_instr_config('defaults') 出厂默认配置
+%   cfg = rigol_instr_config('autodetect') 扫描 VISA 资源，返回填好地址的建议配置（不落盘）
+%         % 用法：cfg = rigol_instr_config('autodetect'); rigol_instr_config('save', cfg);
 %
 % 为什么要有本地覆盖：打包成 exe 后无法改源码，而 VISA 地址每台机器都不一样。
 % 覆盖文件是纯文本 ini（<工作根>/rigol_config.ini），可用界面的「仪器设置」修改，
@@ -31,8 +33,36 @@ switch lower(cmd)
         end
     case 'file'
         varargout{1} = cfg_file();
+    case 'autodetect'
+        varargout{1} = autodetect();
     otherwise
         error('rigol:config:cmd', '未知命令 %s', cmd);
+end
+end
+
+function cfg = autodetect()
+%AUTODETECT 扫描 VISA 资源，把识别到的示波器/信号源填进配置（只覆盖识别到的那一项，
+% 另一项保留原值，避免把手工调好的地址清掉）。结果需要调用方自己 save。
+cfg = merged();
+devs = rigol_scan_instruments();
+sc = pick_dev(devs, 'scope');
+aw = pick_dev(devs, 'awg');
+if ~isempty(sc)
+    cfg.scope_visa = sc;
+end
+if ~isempty(aw)
+    cfg.awg_visa = aw;
+end
+cfg.detected = struct('n', numel(devs), 'scope', sc, 'awg', aw); % 仅作报告，write_ini 会忽略
+end
+
+function v = pick_dev(devs, role)
+v = '';
+for i = 1:numel(devs)
+    if strcmp(devs(i).role, role)
+        v = devs(i).visa;
+        return;
+    end
 end
 end
 

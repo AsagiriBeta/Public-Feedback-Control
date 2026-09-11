@@ -11,7 +11,15 @@ PCD（被动空化检测）采集与闭环超声反馈控制。算法来自 Wash
 | 示波器 | **RIGOL DHO814**（DHO800 系列） | USB-VISA / USBTMC |
 | 信号源 | **RIGOL DG2052**（DG2000 系列） | USB-VISA |
 
-VISA 地址在 `rigol/rigol_instr_config.m`。换仪器后在 MATLAB 执行 `visadevlist`，把 `ResourceName` 填进去。
+VISA 地址的默认值在 `rigol/rigol_instr_config.m`。实际使用时**不用手抄地址**：界面点
+**仪器设置 → 扫描仪器**，程序会枚举本机 VISA 资源、逐个发 `*IDN?` 读出型号，自动把 DHO814 /
+DG2052 填好；识别不出来时也能手动输入。命令行等价写法：
+
+```matlab
+devs = rigol_scan_instruments();            % 看看都挂着什么仪器
+cfg  = rigol_instr_config('autodetect');    % 自动填好识别到的示波器/信号源
+rigol_instr_config('save', cfg);            % 落盘
+```
 
 官方手册请从产品页下载；本机副本可放在 `manuals/`（不入库）。
 
@@ -26,11 +34,11 @@ DHO814 **没有 EXT 口**，因此用 CH1 边沿触发每一发。无换能器/5
 
 ## 运行
 
-需要：**MATLAB R2020b+**（本机为 R2025b）、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
+需要：**MATLAB R2020b+**（本机为 R2026a）、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
 
 ```matlab
-cd('/Users/asagiri/Projects/Public-Feedback-Control')
-start_gui          % GUIDE 主界面（等价于 pfc_app）
+cd('<项目目录>')     % 例如 D:\Projects\Public-Feedback-Control
+start_gui           % GUIDE 主界面（等价于 pfc_app）
 ```
 
 界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT 并写入 `data/`（或你选的保存目录）。**PCDcontrol** / **Sonication** 每一发同样刷新时域+FFT，结束后把全部脉冲存成 `.mat`。
@@ -56,8 +64,11 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 | `pfc_apply_gui_layout.m` / `pfc_ui_colors.m` | 界面布局 / 全局配色（唯一出处） |
 | `pfc_run_experiment.m` / `pfc_debug_no_mb.m` / `pfc_debug_live.m` | 采集、开环、闭环与调试主流程 |
 | `pfc_gui_params.m` / `pfc_root.m` / `pfc_gui_close.m` | 参数持久化、可写路径、关窗存盘 |
+| `pfc_instr_dialog.m` | 仪器设置对话框（扫描 + 选择 + 手动输入） |
+| `pfc_version.m` / `pfc_update.m` | 版本号（唯一出处）／更新检查与安装 |
 | `pfc_build_exe.m` | Windows 打包脚本 |
 | `pfc_visa.m` / `pfc_gui_busy.m` / `pfc_ensure_save_dir.m` 等 | 连接、运行锁、存盘等公共件 |
+| `rigol/rigol_scan_instruments.m` / `rigol_visa_table.m` | 仪器自动扫描 / `visadevlist` 返回值解析 |
 | `rigol/` | DHO814 / DG2052 驱动与自检、单次收发 |
 | `data/` | 采集默认保存目录（不入库） |
 
@@ -74,6 +85,8 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 | 配色 | `pfc_ui_colors.m` |
 | 仪器地址 | `rigol_instr_config.m`（默认值 + 本地 `rigol_config.ini`） |
 | 界面参数 | `pfc_gui_params.m` |
+| 版本号 | `pfc_version.m`（发版只改这里） |
+| 更新源 | `pfc_update.m` + 本地 `pfc_update.ini`（没有该文件＝关闭更新检查） |
 
 ## 本机配置的存放位置
 
@@ -88,25 +101,116 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 |------|------|--------|
 | `pfc_gui_params.mat` | 界面参数存档 | 回到界面默认值 |
 | `rigol_config.ini` | 仪器 VISA 地址覆盖 | 回到代码内默认地址 |
+| `pfc_update.ini` | 更新源地址 | 关闭更新检查 |
 | `data/` | 默认采集输出目录 | 下次自动重建 |
 
-仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）。
+仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）；点进去先按 **扫描仪器**
+能自动识别接着的 DHO814 / DG2052。
 
 ## 打包成 Windows 独立程序（可选）
 
-需要一台装了 **MATLAB + MATLAB Compiler** 的 Windows 机器 —— **Compiler 不支持交叉编译，macOS 上无法产出 Windows exe**。
+需要一台装了 **MATLAB + MATLAB Compiler + MATLAB Compiler SDK + Instrument Control Toolbox** 的 Windows
+机器 —— **Compiler 不支持交叉编译，macOS 上无法产出 Windows exe**。后两者不能省：`rigol/` 的
+`visadev` 通信要随 exe 打进 Runtime 侧依赖（缺 ICT 编译时直接报错），安装包由 Compiler SDK 生成。
 
 ```matlab
-pfc_build_exe                  % 编译 exe，并打包含 MATLAB Runtime 的安装程序
+pfc_build_exe                  % 编译 exe，并打包安装程序
 pfc_build_exe('noinstaller')   % 只编译 exe
 ```
 
-产物在 `build/` 下。目标机运行前需安装：
+脚本会先把项目根与 `rigol/` 加进路径再编译 —— mcc 的依赖分析只认「编译时在路径上」的文件，
+漏掉 `rigol/` 会编译通过、exe 一跑才报 `Undefined function 'rigol_xxx'`。
 
-1. **MATLAB Runtime**（版本与编译用的 MATLAB 一致；安装包可选内置）；
+产物在 `build/` 下：
+
+| 文件 | 说明 |
+|------|------|
+| `pfc_app.exe` | 独立程序本体（约 1.5 MB，已内含 `rigol/` 驱动与 `.fig` 界面） |
+| `PFC_Installer.exe` | 分发用安装程序（约 3 MB）；Runtime 交付方式见下 |
+
+## 分发到目标机
+
+**只分发 `PFC_Installer.exe` 即可。** 目标机双击它，安装向导会自动从 MathWorks 下载并安装
+MATLAB Runtime，装完桌面/开始菜单就有图标，之后点击即用 —— 部署的人不用自己去找 Runtime。
+
+前提是**目标机安装时能上外网**（安装器会拉 ~5 GB 的 Runtime）。交付方式由脚本自动选：
+
+| 编译机上 | `RuntimeDelivery` | 目标机安装时 |
+|----------|-------------------|--------------|
+| 没有 Runtime 安装包（默认） | `web` | 联网自动下载并安装 Runtime |
+| 先跑过 `compiler.runtime.download` | `installer` | 断网也能装（安装包体积大得多） |
+
+`pfc_app.exe` **不能单独分发**：MATLAB Compiler 生成的 exe 不含解释器，必须在本机找到
+版本匹配的 MATLAB Runtime（它靠注册表定位，`RegQueryValueExW`），因此不存在"拷贝即运行"
+的免安装形态 —— 绿色版这条路走不通。
+
+目标机上还需要（安装器不负责这些）：
+
+1. **MATLAB Runtime R2026a** —— 已由 `PFC_Installer.exe` 处理；
 2. **NI-VISA**（或仪器厂商 VISA）+ 仪器 USB 驱动 —— `visadev` 依赖它，且不在 Runtime 内。
 
 打包后换仪器不用重新编译：运行程序 → 界面 **仪器设置** → 填 VISA 地址。
+
+## 软件更新
+
+「文件」面板右上角有 **检查更新** 按钮；当前版本号显示在窗口标题上。
+
+### 怎么工作
+
+1. 读 `<工作根>/pfc_update.ini` 里的 `source`（更新源）；
+2. 拉取该地址的**更新清单**（JSON），与 `pfc_version()` 比较版本；
+3. 有新版就弹窗问一句，确认后把安装包下载到临时目录并**启动安装程序**；
+4. 安装程序要替换程序文件，所以会先提示你关掉本程序。
+
+首次点「检查更新」若提示未配置更新源，跟着弹窗填地址即可。
+
+### 更新源
+
+两种写法都支持，目标机不必上外网：
+
+```
+source=https://your-server/pfc/update.json      # 内网 HTTP 服务
+source=\\nas\share\pfc\update.json              # 局域网共享
+```
+
+### 更新清单格式
+
+```json
+{
+  "version": "0.2.0",
+  "url": "PFC_Installer.exe",
+  "notes": "新增仪器自动扫描；修复 XXX"
+}
+```
+
+`url` 写相对路径时按清单所在目录解析，所以把整个发布目录（`update.json` + `PFC_Installer.exe`）
+一起丢到服务器或共享盘即可，换机器不用改。
+
+### 发版流程
+
+1. 改 `pfc_version.m` 里的版本号（唯一出处）；
+2. `pfc_build_exe` 出新的 `PFC_Installer.exe`；
+3. 把新的 `update.json`（`version` 改成新号）与 `PFC_Installer.exe` 覆盖到更新源目录。
+
+程序只做「下载 + 启动安装程序」，不会静默覆盖文件；装不装由用户在弹窗里确认。
+
+### 已经部署的旧版怎么升级
+
+**关键前提：更新功能是 v0.1.0 才有的。** 更早的版本界面上既没有「检查更新」按钮、也不显示
+版本号，所以它**无法自我更新**，那些机器必须人工装一次新安装包：
+
+| 目标机当前版本 | 升级方式 |
+|----------------|----------|
+| v0.1.0 之前（无更新按钮） | 从共享盘/更新源拷 `PFC_Installer.exe` 过去，双击装一次；装完就有更新功能了 |
+| v0.1.0 及以后 | 界面点 **检查更新** → 确认 → 自动下载并启动安装器 → 关掉程序等它装完 |
+
+几点注意：
+
+- **升级时程序必须关闭**，否则安装器替换不了正在运行的 exe。点「检查更新」时程序会提示先关掉。
+- **不用先卸载旧版**：安装程序装到同一目录并覆盖程序文件；若它提示"已安装"，按提示覆盖/修复即可。
+- **参数与数据不会丢**：界面参数、仪器地址、更新源都在 `%LOCALAPPDATA%\PFC` 下，不在安装目录里，
+  采集数据也在你指定的目录，升级都不受影响 —— 装完不用重调参数。
+- 升级后建议先点 **仪器设置 → 扫描仪器** 确认仪器还认得出来，再跑采集。
 
 ## 许可
 

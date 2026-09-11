@@ -579,37 +579,61 @@ catch err
 end
 
 
-% --- 仪器设置：编辑 VISA 地址（打包成 exe 后无需改代码即可换仪器） ---
+% --- 仪器设置：自动扫描 + 选择 + 手动输入（打包成 exe 后无需改代码即可换仪器） ---
 function InstrSetup_Callback(hObject, eventdata, handles) %#ok<INUSL>
 if pfc_visa('is_busy')
     warndlg('采集进行中，请先 STOP。', 'PFC');
     return;
 end
-cfg = rigol_instr_config();
-d = inputdlg( ...
-    {'示波器 VISA 地址（DHO814）', '信号源 VISA 地址（DG2052）'}, ...
-    '仪器设置 / Instruments', [1 64; 1 64], ...
-    {char(cfg.scope_visa), char(cfg.awg_visa)});
-if isempty(d)
+pfc_instr_dialog();
+
+
+% --- 检查更新：读更新清单，有新版本则下载并启动安装程序 ---
+function CheckUpdate_Callback(hObject, eventdata, handles) %#ok<INUSL>
+if pfc_visa('is_busy')
+    warndlg('采集进行中，请先 STOP。', 'PFC');
     return;
 end
-s1 = strtrim(d{1});
-s2 = strtrim(d{2});
-if isempty(s1) || isempty(s2)
-    errordlg('VISA 地址不能为空。', 'PFC');
+info = pfc_update('check');
+if ~info.ok
+    sel = questdlg(sprintf('%s\n\n现在设置更新源吗？', info.error), ...
+        '检查更新', '设置更新源', '取消', '设置更新源');
+    if strcmp(sel, '设置更新源')
+        try
+            pfc_update('set_source');
+        catch err
+            errordlg(err.message, '检查更新');
+            return;
+        end
+        msgbox('更新源已保存。请再点一次「检查更新」。', '检查更新');
+    end
     return;
 end
-cfg.scope_visa = s1;
-cfg.awg_visa = s2;
-try
-    rigol_instr_config('save', cfg);
-    pfc_visa('close');   % 释放旧连接，下次采集按新地址重连
-catch err
-    errordlg(err.message, '仪器设置');
+if ~info.available
+    msgbox(sprintf('已是最新版本  v%s\n\n更新源：%s', info.current, info.source), ...
+        '检查更新');
     return;
 end
-msgbox(sprintf('已保存到：\n%s\n\n下次采集将按新地址连接。', rigol_instr_config('file')), ...
-    '仪器设置');
+notes = info.notes;
+if isempty(notes)
+    notes = '（更新清单未提供说明）';
+end
+q = sprintf(['发现新版本  v%s（当前 v%s）\n\n%s\n\n' ...
+    '下载后会自动启动安装程序；安装期间本程序需处于关闭状态。\n是否现在下载？'], ...
+    info.latest, info.current, notes);
+sel = questdlg(q, '检查更新', '下载并安装', '稍后', '稍后');
+if ~strcmp(sel, '下载并安装')
+    return;
+end
+out = pfc_update('apply', info);
+if ~out.ok
+    errordlg(out.error, '检查更新');
+    return;
+end
+msgbox(sprintf(['更新包已就绪：\n%s\n\n' ...
+    '安装程序将在约 2 秒后自动启动。\n' ...
+    '请先关闭本程序，否则安装程序无法替换正在运行的文件。'], out.file), ...
+    '检查更新');
 
 
 function OneshotFFT_Callback(hObject, eventdata, handles) %#ok<INUSL>

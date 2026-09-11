@@ -16,7 +16,7 @@ else
 end
 
 tags = {'OneshotFFT', 'DebugRun', 'PCDcontrol', 'OpenMB', 'Sonication', 'IniFgen', ...
-    'Choose_file', 'InstrSetup'};
+    'Choose_file', 'InstrSetup', 'CheckUpdate'};
 for i = 1:numel(tags)
     t = tags{i};
     if isfield(handles, t) && isgraphics(handles.(t))
