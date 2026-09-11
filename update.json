@@ -1,0 +1,1 @@
+{"version":"0.1.0","url":"https://github.com/AsagiriBeta/Public-Feedback-Control/releases/latest/download/PFC_Installer.exe","notes":"新增仪器自动扫描：一键枚举 VISA 资源并识别 DHO814 / DG2052；新增「检查更新」；新增一条命令发版 pfc_release。"}
