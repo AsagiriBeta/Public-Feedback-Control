@@ -191,8 +191,8 @@ function m = fetch_manifest(src)
 % 支持两种来源：http(s) 网址 与 本地/局域网共享路径
 if is_url(src)
     try
-        % 追加一次性参数绕开 CDN 缓存。raw.githubusercontent.com 会缓存约 5 分钟，
-        % 刚 push 完 update.json 就点「检查更新」，不加这个很可能拿到旧清单。
+        % 加一次性参数（对 raw 的 CDN 无效，原因见 with_cache_buster）：发版后短时间内
+        % 仍可能读到旧清单，这是 GitHub raw 的固有行为，不是程序出错。
         txt = webread(with_cache_buster(src), ...
             weboptions('ContentType', 'text', 'Timeout', 15));
     catch err
@@ -252,7 +252,10 @@ tf = ~isempty(regexp(char(string(s)), '^\w+://', 'once'));
 end
 
 function u = with_cache_buster(url)
-%WITH_CACHE_BUSTER 给地址加一个一次性参数，绕开服务器/CDN 的清单缓存。
+%WITH_CACHE_BUSTER 给地址加一个一次性参数。
+% 实测结论（别被名字误导）：raw.githubusercontent.com 的 CDN **忽略查询参数**，而且它有多台
+% 边缘节点、各自缓存约 5 分钟，所以这个参数并不保证拿到最新清单 —— 发版后仍可能短暂读到旧内容。
+% 保留它只是为了规避某些中间代理/本地缓存按完整 URL 缓存的情况。真正可靠的办法是等几分钟。
 % 只在取清单时用；解析相对路径用的仍是原始地址，不受影响。
 u = char(string(url));
 if contains(u, '?')
