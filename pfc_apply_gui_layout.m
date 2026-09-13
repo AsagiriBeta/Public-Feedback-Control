@@ -1,12 +1,22 @@
 function pfc_apply_gui_layout(fig)
-%PFC_APPLY_GUI_LAYOUT 对齐 GUIDE 控件、中英标签，并套深色样式。
+%PFC_APPLY_GUI_LAYOUT 对齐 GUIDE 控件、中英标签、套深色样式，并做整体等比自适应。
+%
+% 自适应策略：所有坐标先按固定「设计画布」DW x DH 排好，再由 pfc_layout_scale
+% 整体等比缩放到当前窗口；窗口大小变化时由 SizeChangedFcn 重新缩放。
+% 于是任意分辨率 / 显示缩放(DPI) / 窗口大小下，内容都完整可见且比例不变。
 
 C = pfc_ui_colors();
+
+% 设计画布（固定像素；下面所有 place 坐标都以它为准）
+DW = 1440; DH = 900;
+
+% 首屏缩放：保证窗口不超出可用屏幕（给标题栏 / 任务栏留白）
 scr = get(0, 'ScreenSize');
-W = min(1580, max(1280, scr(3) - 48));
-H = min(940, max(860, scr(4) - 90));
-set(fig, 'Units', 'pixels', 'Position', [40 50 W H], ...
-    'Color', C.fig, 'Resize', 'off', 'Visible', 'on', ...
+s0 = min([1.3, (scr(3) - 60) / DW, (scr(4) - 90) / DH]);
+s0 = max(s0, 0.5);
+
+set(fig, 'Units', 'pixels', 'Position', [40 50 DW DH], ...
+    'Color', C.fig, 'Resize', 'on', 'Visible', 'off', ...
     'Name', ['PFC  ·  DHO814 / DG2052  ·  ' pfc_version('label')], ...
     'MenuBar', 'none', 'ToolBar', 'none', 'NumberTitle', 'off');
 try
@@ -16,7 +26,7 @@ end
 movegui(fig, 'onscreen');
 set(fig, 'Units', 'pixels');
 fp = get(fig, 'Position');
-W = fp(3); H = fp(4);
+W = fp(3); H = fp(4);   % 即设计尺寸，供下面排版使用
 
 L = 18; LW = 520; G = 8; top_clear = 56; bot = 14;
 file_h = 88; acq_h = 118; fus_h = 154; pcd_h = 112; fb_h = 132;
@@ -184,6 +194,14 @@ set(getp(g5,'PulseNum'), 'HorizontalAlignment', 'center', 'FontSize', 12, ...
 square_btn(getp(g5,'stop'), C, '停止超声  STOP FUS', C.danger, 15);
 
 watch_params(fig);
+
+% --- 自适应收尾：记录设计坐标 → 缩放到首屏尺寸 → 随窗口变化重新缩放 ---
+pfc_layout_scale(fig, DW, DH);                                    % 记录设计坐标
+set(fig, 'Position', [fp(1), fp(2), round(DW * s0), round(DH * s0)]);
+pfc_layout_scale(fig);                                            % 按首屏尺寸缩放
+set(fig, 'SizeChangedFcn', @(src, ~) pfc_layout_scale(src));
+movegui(fig, 'onscreen');
+set(fig, 'Visible', 'on');
 end
 
 function watch_params(fig)

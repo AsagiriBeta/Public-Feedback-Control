@@ -85,6 +85,14 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 | 配色 | `pfc_ui_colors.m` |
 | 仪器地址 | `rigol_instr_config.m`（默认值 + 本地 `rigol_config.ini`） |
 | 界面参数 | `pfc_gui_params.m` |
+| 界面自适应缩放 | `pfc_layout_scale.m`（设计画布 `1440×900` 等比缩放） |
+
+界面自适应做法：布局代码只在固定的「设计画布」上排版，再由 `pfc_layout_scale` 把整棵
+控件树的 `Position`/`FontSize` 乘以 `s = min(窗口宽/1440, 窗口高/900)`；窗口尺寸变化时
+`SizeChangedFcn` 重新计算，因此任意分辨率、显示缩放(DPI)、窗口大小下内容都完整可见。
+等比缩放只在一个方向刚好填满，另一个方向会剩空白，所以内容会按**实际包围盒在窗口内居中**，
+不会「偏左下」。运行时绘图用 `pfc_ui_scale(ax)` 取同一个系数，保证图内字号同步。
+缩放限制在 `0.5–2.0`，窗口被拖得小于最小尺寸时会被顶回。
 | 版本号 | `pfc_version.m`（发版只改这里） |
 | 更新源 | `pfc_update.m` + 本地 `pfc_update.ini`（没有该文件＝关闭更新检查） |
 

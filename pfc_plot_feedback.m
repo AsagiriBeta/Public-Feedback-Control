@@ -10,15 +10,16 @@ style_dot(handles.realtimeVplot, pulse, volt, accent, xmax, [0 ymax], '电压  V
 end
 
 function style_dot(ax, x, y, col, xmax, ylims, ttl, axBg, axFg, gridC)
+sc = pfc_ui_scale(ax);   % 图内字号 / 点大小随界面缩放
 hold(ax, 'on');
-plot(ax, x, y, '.', 'Color', col, 'MarkerSize', 16);
+plot(ax, x, y, '.', 'Color', col, 'MarkerSize', 16 * sc);
 set(ax, 'Color', axBg, 'XColor', axFg, 'YColor', axFg, ...
     'GridColor', gridC, 'GridAlpha', 0.5, 'GridLineStyle', ':', ...
     'Box', 'off', 'TickDir', 'out', 'XLim', [0 xmax]);
 if ~isempty(ylims)
     set(ax, 'YLim', ylims);
 end
-title(ax, ttl, 'Color', axFg, 'FontSize', 10);
+title(ax, ttl, 'Color', axFg, 'FontSize', 10 * sc);
 xlabel(ax, 'Pulse #', 'Color', axFg);
 grid(ax, 'on');
 end

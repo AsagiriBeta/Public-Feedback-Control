@@ -19,6 +19,7 @@ colT = C.line; colF = C.line;
 
 sax = handles.Signal_plot;
 fax = handles.FFT_plot;
+sc = pfc_ui_scale(sax);   % 界面缩放系数：窗口缩放后，图内字号跟着一起缩放
 
 ht = plot(sax, tt_us, chA);
 set(ht, 'Color', colT, 'LineWidth', 1.15);
@@ -26,14 +27,14 @@ grid(sax, 'on');
 set(sax, 'Color', axBg, 'XColor', axFg, 'YColor', axFg, ...
     'GridColor', gridC, 'GridAlpha', 0.5, 'GridLineStyle', ':', ...
     'Box', 'off', 'TickDir', 'out');
-title(sax, [prefix '时域  Time'], 'Color', axFg, 'FontSize', 10);
+title(sax, [prefix '时域  Time'], 'Color', axFg, 'FontSize', 10 * sc);
 xlabel(sax, 'Time (\mus)', 'Color', axFg);
 ylabel(sax, 'V', 'Color', axFg);
 
 sig = chA(isfinite(chA));
 if isempty(chA) || isempty(sig) || max(abs(sig(:))) < 1e-5
-    title(sax, [prefix '时域  无信号 / no signal'], 'Color', C.warn, 'FontSize', 10);
-    title(fax, [prefix 'FFT  无有效波形'], 'Color', C.warn, 'FontSize', 10);
+    title(sax, [prefix '时域  无信号 / no signal'], 'Color', C.warn, 'FontSize', 10 * sc);
+    title(fax, [prefix 'FFT  无有效波形'], 'Color', C.warn, 'FontSize', 10 * sc);
     f_peak_mhz = NaN;
     db_peak = NaN;
     drawnow limitrate;
@@ -63,13 +64,13 @@ end
 db2 = band_peak_db(F, db, 2 * f0_mhz * 1e6, 200e3);
 if ~isnan(f_peak_mhz)
     plot(fax, f_peak_mhz, db_peak, 'o', 'Color', C.text, ...
-        'MarkerSize', 7, 'LineWidth', 1.2);
+        'MarkerSize', 7 * sc, 'LineWidth', 1.2);
     title(fax, sprintf('%sFFT  f_0=%.2f  SC 2f=%.2f MHz (%.0f dB)  peak=%.3f', ...
         prefix, f0_mhz, 2*f0_mhz, db2, f_peak_mhz), ...
-        'Color', axFg, 'FontSize', 10);
+        'Color', axFg, 'FontSize', 10 * sc);
 else
     title(fax, sprintf('%sFFT  f_0=%.2f  SC 2f=%.2f MHz', prefix, f0_mhz, 2*f0_mhz), ...
-        'Color', axFg, 'FontSize', 10);
+        'Color', axFg, 'FontSize', 10 * sc);
 end
 hold(fax, 'off');
 drawnow limitrate;
