@@ -146,6 +146,13 @@ result = save_now();
         S.timebase_offset_s = info.time_offset_s;
         S.burst_align = align;           % 猝发在采集窗里的位置（对齐自检）
         S.waveform_format = info.waveform_format;   % WORD = 16 位容器 / 12 位 ADC
+        % RAW 模式下的波形几何：XORigin 是「内存」波形的起始时间（手册 3.28.7），
+        % 屏幕窗与内存记录不重合时它就解释了「猝发为什么落在窗内某处」
+        S.wf_xorigin_s = info.wf_xorigin_s;
+        S.wf_xref = info.wf_xref;
+        S.wf_yorigin = info.wf_yorigin;
+        S.wf_yref = info.wf_yref;        % 同时反映 WORD 的二进制约定（0=补码 / 32768=偏移）
+        S.wf_yinc = info.wf_yinc;
     end
 
     function run_loop(dur_s, max_pulses, volt, do_fb, label, sc_tgt, sc_hi, sc_lo, max_mVpp)

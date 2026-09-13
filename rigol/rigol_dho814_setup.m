@@ -29,9 +29,13 @@ scale = t_total / 10;
 writeline(dev, sprintf(':TIMebase:MAIN:SCALe %.12g', scale));
 writeline(dev, ':TIMebase:HREFerence:MODE LB');
 % 水平偏移必须显式归零。以前从不设置它，用的是仪器残留状态：实测某轮 92 帧里
-% 猝发起点一致落在窗内 1.180 ms 处（1 ms 的猝发只有 0.42 ms 进窗，零抖动）。
-% 后果是 SC/IC 被占空比稀释约 11 dB，而且稀释系数取决于一个不受控的参数 ——
-% 标定会随仪器状态漂。归零后（参考点=左）触发点落在窗左端，整段猝发进窗。
+% 1 ms 的猝发只有 0.42 ms 落在窗内（猝发起点一致在 1.180 ms、零抖动），
+% 后果是 SC/IC 被占空比稀释约 11 dB，而且稀释系数取决于一个不受控的参数。
+%
+% 注意：上面那行 HREFerence:MODE LB 是**缩放锚点**——手册 3.26.7 写明它是「改变水平
+% 时基时，围绕屏幕左侧扩展或压缩波形」，管的是缩放，**不能**用来推理触发点落在窗内
+% 哪个位置。所以归零后触发点到底在哪，仍需实测：采集时会跑一次 check_burst_window
+% 把结果打进日志并存进数据（burst_align），RAW 模式下的波形几何见下面 wf_* 字段。
 writeline(dev, ':TIMebase:MAIN:OFFSet 0');
 
 trigChan = sprintf('CHANnel%d', tx);
@@ -40,6 +44,18 @@ writeline(dev, sprintf(':TRIGger:EDGE:SOURce %s', trigChan));
 writeline(dev, ':TRIGger:EDGE:SLOPe POSitive');
 writeline(dev, sprintf(':TRIGger:EDGE:LEVel %.8g', trigLevel));
 writeline(dev, sprintf(':TRIGger:SWEep %s', sweep));
+
+% 记录 RAW 模式下的波形几何。XORigin 尤为重要：手册 3.28.7 写明「RAW 模式下返回
+% **内存**中波形数据的起始时间」——屏幕窗与内存记录不重合时，第 1 个采样点就不在
+% 触发点上，这本身就能造成一个固定偏移，而且归零 :TIMebase:MAIN:OFFSet 治不了它。
+% 存下来，「猝发为什么落在窗内某处」才是有据可查而不是靠猜。
+writeline(dev, sprintf(':WAVeform:SOURce CHANnel%d', pcd));
+writeline(dev, ':WAVeform:MODE RAW');
+info.wf_xorigin_s = qnum(dev, ':WAVeform:XORigin?');
+info.wf_xref      = qnum(dev, ':WAVeform:XREFerence?');
+info.wf_yorigin   = qnum(dev, ':WAVeform:YORigin?');
+info.wf_yref      = qnum(dev, ':WAVeform:YREFerence?');
+info.wf_yinc      = qnum(dev, ':WAVeform:YINCrement?');
 
 writeline(dev, ':RUN');
 

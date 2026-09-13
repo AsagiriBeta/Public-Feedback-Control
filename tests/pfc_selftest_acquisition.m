@@ -30,6 +30,18 @@ fails = fails + expect(isequal(rigol_decode_waveform(b, 'WORD'), codes), ...
 fails = fails + expect(numel(rigol_decode_waveform(b(1:end-1), 'WORD')) == numel(codes) - 1, ...
     '奇数长度容错（丢掉半个样本而不是崩）');
 
+% 手册没写 WORD 是有符号补码还是偏移二进制，两种固件约定都要能吃（靠 YREFerence 判）
+u = [32768 33768 31768 10];
+bo = zeros(1, 2 * numel(u), 'uint8');
+for i = 1:numel(u)
+    bo(2 * i - 1) = uint8(mod(u(i), 256));
+    bo(2 * i) = uint8(floor(u(i) / 256));
+end
+fails = fails + expect(isequal(rigol_decode_waveform(bo, 'WORD', 32768), u), ...
+    '偏移二进制约定（yref≈32768）还原为无符号');
+fails = fails + expect(isequal(rigol_decode_waveform(bo, 'WORD', 0), ...
+    [-32768 -31768 31768 10]), '有符号补码约定（yref≈0）按补码解');
+
 % ---------------------------------------------------------------- 2) 削顶判定
 fprintf('\n=== 2) 削顶判定（SCALe = 2 mV/div，标称满量程 ±8.0 mV）===\n');
 fs = 31.25e6;

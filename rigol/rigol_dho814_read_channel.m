@@ -6,6 +6,10 @@ function [y, xinc] = rigol_dho814_read_channel(dev, ch, npts, wavemode)
 % 而 BYTE 的量化噪声 RMS 就有约 72 µV —— 那时测到的全是量化本底，不是空化宽带。
 %
 % 不把短波形补零（避免假 FFT 峰）。
+%
+% 注意 DHO800 的 :WAVeform:* 一共 14 条命令，**没有** :WAVeform:BYTeorder
+% （手册 3.28 各节），所以字节序不能靠发命令声明，只能按约定解析 —— 见下面的
+% YREFerence 判断。
 if nargin < 4 || isempty(wavemode)
     wavemode = 'RAW';
 end
@@ -15,8 +19,6 @@ chan = sprintf('CHANnel%d', ch);
 writeline(dev, sprintf(':WAVeform:SOURce %s', chan));
 writeline(dev, sprintf(':WAVeform:MODE %s', wavemode));
 writeline(dev, sprintf(':WAVeform:FORMat %s', FMT));
-% 显式声明字节序，别依赖仪器默认值 —— WORD 下解错字节序会得到完全错误的波形
-writeline(dev, ':WAVeform:BYTeorder LSBFirst');
 if strcmpi(wavemode, 'RAW')
     writeline(dev, sprintf(':WAVeform:POINts %d', npts));
     writeline(dev, ':WAVeform:STARt 1');
@@ -47,7 +49,9 @@ if isempty(payload)
     error('rigol:dho814:waveform', '未读到 CH%d 波形', ch);
 end
 
-raw = rigol_decode_waveform(payload, FMT);
+% 按 YREFerence 判定二进制约定（详见 rigol_decode_waveform 的说明）
+raw = rigol_decode_waveform(payload, FMT, yref);
+
 y = (raw - yor - yref) .* yinc;
 if isfinite(nact) && nact > 0 && numel(y) > nact
     y = y(1:nact);
