@@ -169,7 +169,12 @@ pfc_build_exe('noinstaller')   % 只编译 exe
 
 脚本会先把项目根下所有子目录（`src/`、`rigol/` 等）加进路径再编译 —— mcc 的依赖分析只认
 「编译时在路径上」的文件，漏掉 `src/` 或 `rigol/` 会编译通过、exe 一跑才报 `Undefined function`。
-`web/` 属于静态资源、不在依赖分析范围内，由脚本作为附加文件打进去。
+`web/` 属于静态资源、不在依赖分析范围内，由脚本作为附加文件打进去；注意打包后它**不在**
+`<ctfroot>\web`，而被解到 `<ctfroot>\pfc_app\web`，定位逻辑见 `src/ui/pfc_web_root.m`。
+
+打包用 `compiler.build.standaloneWindowsApplication`，**不要**换回 `standaloneApplication`：
+后者生成的是控制台子系统程序，双击会先弹一个黑色 cmd 窗口，界面还没出来；关掉它还连带把程序关掉。
+前者参数完全一致，只是不启动 Windows 命令行。
 
 产物在 `build/` 下：
 

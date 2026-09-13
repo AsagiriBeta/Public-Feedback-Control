@@ -34,7 +34,7 @@ if ~ispc
         ['MATLAB Compiler 不支持交叉编译：Windows 的 exe 必须在 Windows 上编译。\n' ...
          '请把本仓库拷到装了 MATLAB + MATLAB Compiler 的 Windows 机器上再运行 pfc_build_exe。']);
 end
-if isempty(which('compiler.build.standaloneApplication'))
+if isempty(which('compiler.build.standaloneWindowsApplication'))
     error('PFC:build', '未找到 MATLAB Compiler（需单独授权并安装），无法打包。');
 end
 
@@ -56,8 +56,12 @@ if ~isfile(fullfile(root, 'web', 'index.html'))
     error('PFC:build:web', '缺少前端资源：%s', fullfile(root, 'web', 'index.html'));
 end
 
+% 必须用 standaloneWindowsApplication，不能用 standaloneApplication：
+% 后者生成的是控制台子系统程序，双击会先弹一个黑色 cmd 窗口（界面还没出来），
+% 关掉窗口程序也一起没了。前者专门生成「不弹 Windows 命令行」的 GUI 程序，
+% 参数完全一致。见 help compiler.build.standaloneWindowsApplication。
 fprintf('[1/2] 编译入口 pfc_app.m （版本 %s）...\n', pfc_version('label'));
-res = compiler.build.standaloneApplication('pfc_app.m', ...
+res = compiler.build.standaloneWindowsApplication('pfc_app.m', ...
     'AdditionalFiles', {'web'}, ...
     'OutputDir', outDir);
 fprintf('      exe 已输出到：%s\n', outDir);
