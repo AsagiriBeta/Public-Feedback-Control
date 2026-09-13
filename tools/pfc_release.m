@@ -19,12 +19,14 @@ function info = pfc_release(varargin)
 % 目标机清单里的 url 是 releases/download/v<版本>/PFC_Installer_v<版本>.exe：永久有效，
 % 文件名又带版本号便于区分。version 与 url 都由 pfc_installer_asset 按当前版本重算，
 % 不会出现「包是新的、清单还指着旧的」。
-root = fileparts(mfilename('fullpath'));
+% tools/ 的上一级就是项目根（同 pfc_build_exe，不依赖是否跑过 pfc_setup）
+root = fileparts(fileparts(mfilename('fullpath')));
 if isempty(root)
     root = pwd;
 end
 old = cd(root);
 restoreDir = onCleanup(@() cd(old)); %#ok<NASGU>
+addpath(genpath(root));   % 保证 pfc_version / pfc_build_exe / pfc_installer_asset 都能找到
 
 [dryRun, force, notes] = parse_args(varargin);
 ver = pfc_version();

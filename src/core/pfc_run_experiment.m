@@ -1,12 +1,14 @@
-function result = pfc_run_experiment(mode, handles)
+function result = pfc_run_experiment(mode, ui)
 %PFC_RUN_EXPERIMENT
 %  'before'  阶段2：无微泡，猝发，CH1+CH2
 %  'open_mb' 阶段3：有微泡开环（输液泵已在跑，不等待注射）
 %  'feedback'/'during' 阶段4：基线 + 闭环（同样假定泵已在输液）
+% ui 为 UI 适配层（实现见 pfc_ui_html，约定接口见 pfc_ui_check）；本函数与界面无关。
 global pfc_abort fgen
+ui = pfc_ui_check(ui);
 cfg = rigol_instr_config();
-p = pfc_gui_fus_params(handles);
-outdir = pfc_ensure_save_dir(handles);
+p = ui.params();
+outdir = ui.outdir();
 pfc_abort = false;
 
 scope = pfc_visa('scope');
@@ -28,9 +30,7 @@ writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, tx_scale
 writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, max(0.005, tx_scale)));
 fprintf('PFC 输出 %.4g mVpp  触发 %.3g mV  （MaxV 仅用于闭环）\n', v_out, trig * 1e3);
 
-cla(handles.realtimeSCplot);
-cla(handles.realtimeICplot);
-cla(handles.realtimeVplot);
+ui.clearTrend();
 
 timeout_s = min(3.0, max(0.9, 3.5 * p.period_s));
 acq_n = p.npts;
@@ -102,9 +102,7 @@ result = save_now();
         if n_good < max(8, round(0.3 * p.n_expect)) && ~strcmp(mode, 'aborted')
             msg = ['【帧数不足，勿当完整实验】  ' msg];
         end
-        if isfield(handles, 'PulseNum') && isgraphics(handles.PulseNum)
-            set(handles.PulseNum, 'String', msg);
-        end
+        ui.status(msg);
         fprintf('%s\n', msg);
     end
 
@@ -157,21 +155,17 @@ result = save_now();
             if isfinite(dur_s) && (dur_s - toc(t1)) < 0.12
                 break;
             end
-            if isfield(handles, 'PulseNum') && isgraphics(handles.PulseNum)
-                tgt = max_pulses;
-                if ~isfinite(tgt)
-                    tgt = p.n_expect;
-                end
-                if isfinite(dur_s)
-                    set(handles.PulseNum, 'String', sprintf( ...
-                        '%s  有效 %d / 目标 %d  剩余 %.0f s', ...
-                        label, n_good - n0, tgt, max(0, dur_s - toc(t1))));
-                else
-                    set(handles.PulseNum, 'String', sprintf('%s  %d / %d', ...
-                        label, n_good - n0, tgt));
-                end
-                drawnow;
+            tgt = max_pulses;
+            if ~isfinite(tgt)
+                tgt = p.n_expect;
             end
+            if isfinite(dur_s)
+                ui.status(sprintf('%s  有效 %d / 目标 %d  剩余 %.0f s', ...
+                    label, n_good - n0, tgt, max(0, dur_s - toc(t1))));
+            else
+                ui.status(sprintf('%s  %d / %d', label, n_good - n0, tgt));
+            end
+            drawnow;
             [chPcd, ~, realFs, chTx] = rigol_dho814_acquire_block( ...
                 scope, p.npts, cfg.scope_pcd_channel, 'single', timeout_s);
             if ~frame_ok(chPcd, chTx)
@@ -183,9 +177,9 @@ result = save_now();
             pulse = pulse + 1;
             n_good = n_good + 1;
             k = n_good;
-            datamat(k, :) = fitrow(chPcd, acq_n); %#ok<AGROW>
-            txmat(k, :) = fitrow(chTx, acq_n); %#ok<AGROW>
-            [fpk, ~] = pfc_update_signal_fft(handles, datamat(k, :), [], info.realFs, p.freq_mhz, 'CH2 PCD'); %#ok<ASGLU>
+            datamat(k, :) = pfc_fitrow(chPcd, acq_n); %#ok<AGROW>
+            txmat(k, :) = pfc_fitrow(chTx, acq_n); %#ok<AGROW>
+            [fpk, ~] = ui.waveform(datamat(k, :), info.realFs, p.freq_mhz, 'CH2 PCD'); %#ok<ASGLU>
             [F, Y, db] = pfc_spectrum(datamat(k, :), info.realFs);
             [sc, ic] = pfc_band_energy(Y, F, p.freq_mhz * 1e6, cfg.harmonic_bandwidth_hz);
             fM = F / 1e6;
@@ -208,7 +202,7 @@ result = save_now();
                 writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, ...
                     min(1.0, max(0.002, max(abs(chPcd)) / 3.2))));
             end
-            pfc_plot_feedback(handles, k, sc, ic, volt, max(30, k + 12), max(volt * 1.5, 40));
+            ui.trend(k, sc, ic, volt, max(30, k + 12), max(volt * 1.5, 40));
             ok1 = isfinite(ch1pk) && abs(ch1pk - p.freq_mhz) < 0.25;
             fprintf('%s  #%d  CH1 %s  CH2 2f(%.2f MHz)=%.1f dB  f/2=%.1f dB\n', ...
                 label, k, ...
@@ -247,17 +241,6 @@ end
 function tf = frame_ok(chPcd, chTx)
 tf = (~isempty(chTx) && numel(chTx) >= 256 && max(abs(chTx)) > 5e-5) || ...
     (~isempty(chPcd) && numel(chPcd) >= 256 && max(abs(chPcd)) > 5e-5);
-end
-
-function row = fitrow(x, n)
-x = x(:).';
-if isempty(x)
-    row = zeros(1, n);
-elseif numel(x) >= n
-    row = x(1:n);
-else
-    row = [x, zeros(1, n - numel(x))];
-end
 end
 
 function s = tern(c, a, b)

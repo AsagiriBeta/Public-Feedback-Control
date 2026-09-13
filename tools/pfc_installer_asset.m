@@ -48,7 +48,7 @@ end
 function slug = repo_slug()
 % 只认 github.com 的 origin；取不到返回空串（离线、非 GitHub 仓库等）。
 slug = '';
-root = fileparts(mfilename('fullpath'));
+root = fileparts(fileparts(mfilename('fullpath')));   % tools/ 的上一级 = 项目根
 % 注意 system 的第一个返回值是 exit status（0 = 成功），不是布尔 ok。
 [st, out] = system(sprintf('%s -C "%s" remote get-url origin 2>&1', git_cmd(), root));
 if st ~= 0

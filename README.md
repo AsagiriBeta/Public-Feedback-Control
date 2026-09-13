@@ -38,7 +38,7 @@ DHO814 **没有 EXT 口**，因此用 CH1 边沿触发每一发。无换能器/5
 
 ```matlab
 cd('<项目目录>')     % 例如 D:\Projects\Public-Feedback-Control
-start_gui           % GUIDE 主界面（等价于 pfc_app）
+pfc_app             % 启动界面（会自动把 src/ rigol/ 等加进路径）
 ```
 
 界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT 并写入 `data/`（或你选的保存目录）。**PCDcontrol** / **Sonication** 每一发同样刷新时域+FFT，结束后把全部脉冲存成 `.mat`。
@@ -50,27 +50,50 @@ DHO814 **示波器屏幕上有 Math FFT**（最多约 1 Mpts，见 [DHO800 数�
 命令窗口也可：
 
 ```matlab
-addpath('rigol')
+pfc_setup                % 把各子目录加进路径（新开一个 MATLAB 会话时跑一次）
 test_dg2052_connection   % 信号源自检（默认不开输出）
 oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保存
 ```
 
 ## 目录
 
+```
+Public-Feedback-Control/
+├── pfc_app.m             启动入口（打包入口）
+├── pfc_setup.m           把各子目录加进 MATLAB 搜索路径（新会话跑一次）
+├── pfc_root.m            可写工作根 / 路径锚点
+├── pfc_version.m         版本号（发版只改这里）
+├── update.json           发布清单（目标机「检查更新」读它）
+├── src/
+│   ├── ui/               界面层：uifigure 宿主、UI 适配层、配色、对话框
+│   ├── core/             业务逻辑：参数校验、采集/闭环流程、信号处理、存盘
+│   └── io/               仪器与配置：VISA、参数存档、检查更新
+├── rigol/                RIGOL DHO814 / DG2052 驱动与自检、单次收发
+├── web/                  新版界面前端：index.html + Alpine.js + uPlot（离线静态资源）
+├── tools/                构建与发布脚本（不参与运行）：pfc_build_exe / pfc_release
+├── data/                 采集默认保存目录（不入库）
+└── manuals/              厂商手册副本（不入库）
+```
+
+各层里的关键文件：
+
 | 路径 | 内容 |
 |------|------|
-| `pfc_app.m` / `start_gui.m` | 启动入口（打包用 `pfc_app`；`start_gui` 为开发快捷方式） |
-| `MatlabScript_FeedbackControl.m` / `.fig` | GUIDE 主界面与回调 |
-| `pfc_apply_gui_layout.m` / `pfc_ui_colors.m` | 界面布局 / 全局配色（唯一出处） |
-| `pfc_run_experiment.m` / `pfc_debug_no_mb.m` / `pfc_debug_live.m` | 采集、开环、闭环与调试主流程 |
-| `pfc_gui_params.m` / `pfc_root.m` / `pfc_gui_close.m` | 参数持久化、可写路径、关窗存盘 |
-| `pfc_instr_dialog.m` | 仪器设置对话框（扫描 + 选择 + 手动输入） |
-| `pfc_version.m` / `pfc_update.m` | 版本号（唯一出处）／更新检查与安装 |
-| `pfc_build_exe.m` | Windows 打包脚本 |
-| `pfc_visa.m` / `pfc_gui_busy.m` / `pfc_ensure_save_dir.m` 等 | 连接、运行锁、存盘等公共件 |
+| `src/ui/pfc_ui_app.m` | 新版界面宿主（`uifigure` + `uihtml`）与事件分发 |
+| `src/ui/pfc_ui_html.m` | UI 适配层：算法层只认这层接口（约定与校验见 `pfc_ui_check.m`） |
+| `src/ui/pfc_ui_check.m` | 校验算法层收到的适配层是否具备约定接口 |
+| `src/ui/pfc_ui_push.m` / `pfc_web_root.m` | 推数据给前端 / 前端资源路径（源码·打包两种模式） |
+| `src/ui/pfc_instr_dialog.m` | 仪器设置对话框（扫描 + 选择 + 手动输入） |
+| `src/ui/pfc_update_flow.m` | 「检查更新」交互流程 |
+| `src/core/pfc_fus_params.m` | FUS 参数校验与推导（唯一出处） |
+| `src/core/pfc_run_experiment.m` / `pfc_oneshot.m` / `pfc_debug_run.m` | 闭环 / 单次 / 调试流程 |
+| `src/core/pfc_debug_no_mb.m` / `pfc_debug_live.m` | 开环调试与运行中实时改参数 |
+| `src/core/pfc_spectrum.m` / `pfc_band_energy.m` / `pfc_fft_peak_mhz.m` | 信号处理 |
+| `src/core/pfc_fitrow.m` | 采样帧定长整形（空帧/不等长帧的兜底，两种采集路径共用） |
+| `src/io/pfc_visa.m` | 仪器连接与运行锁 |
+| `src/io/pfc_prefs.m` | 界面参数持久化 |
+| `src/io/pfc_update.m` | 检查更新（默认源写死 + 本地 `pfc_update.ini` 覆盖） |
 | `rigol/rigol_scan_instruments.m` / `rigol_visa_table.m` | 仪器自动扫描 / `visadevlist` 返回值解析 |
-| `rigol/` | DHO814 / DG2052 驱动与自检、单次收发 |
-| `data/` | 采集默认保存目录（不入库） |
 
 幅度单位为 **mVpp**。本实验室无位移台，电机区已从界面隐藏。
 
@@ -82,19 +105,12 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 |--------|----------|
 | 启动入口 | `pfc_app.m` |
 | 可写路径（存档 / 数据 / 配置） | `pfc_root()` |
-| 配色 | `pfc_ui_colors.m` |
-| 仪器地址 | `rigol_instr_config.m`（默认值 + 本地 `rigol_config.ini`） |
-| 界面参数 | `pfc_gui_params.m` |
-| 界面自适应缩放 | `pfc_layout_scale.m`（设计画布 `1440×900` 等比缩放） |
-
-界面自适应做法：布局代码只在固定的「设计画布」上排版，再由 `pfc_layout_scale` 把整棵
-控件树的 `Position`/`FontSize` 乘以 `s = min(窗口宽/1440, 窗口高/900)`；窗口尺寸变化时
-`SizeChangedFcn` 重新计算，因此任意分辨率、显示缩放(DPI)、窗口大小下内容都完整可见。
-等比缩放只在一个方向刚好填满，另一个方向会剩空白，所以内容会按**实际包围盒在窗口内居中**，
-不会「偏左下」。运行时绘图用 `pfc_ui_scale(ax)` 取同一个系数，保证图内字号同步。
-缩放限制在 `0.5–2.0`，窗口被拖得小于最小尺寸时会被顶回。
+| 前端样式 / 配色 | `web/app.css`（页面）+ `src/ui/pfc_ui_colors.m`（MATLAB 原生窗口与对话框） |
+| 仪器地址 | `rigol/rigol_instr_config.m`（默认值 + 本地 `rigol_config.ini`） |
+| 界面参数 | `src/io/pfc_prefs.m` |
+| FUS 参数校验 | `src/core/pfc_fus_params.m` |
 | 版本号 | `pfc_version.m`（发版只改这里） |
-| 更新源 | `pfc_update.m` + 本地 `pfc_update.ini`（没有该文件＝关闭更新检查） |
+| 更新源 | `src/io/pfc_update.m` + 本地 `pfc_update.ini`（没有该文件＝关闭更新检查） |
 
 ## 本机配置的存放位置
 
@@ -107,13 +123,38 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 
 | 文件 | 作用 | 删除后 |
 |------|------|--------|
-| `pfc_gui_params.mat` | 界面参数存档 | 回到界面默认值 |
+| `pfc_prefs.mat` | 界面参数存档 | 回到界面默认值 |
 | `rigol_config.ini` | 仪器 VISA 地址覆盖 | 回到代码内默认地址 |
 | `pfc_update.ini` | 更新源地址 | 关闭更新检查 |
 | `data/` | 默认采集输出目录 | 下次自动重建 |
 
 仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）；点进去先按 **扫描仪器**
 能自动识别接着的 DHO814 / DG2052。
+
+## 界面
+
+界面本体是 `web/` 下的静态网页（Alpine.js + uPlot），由 `uifigure` + `uihtml` 嵌进 MATLAB 窗口；
+MATLAB 只负责仪器与算法，两者走 `uihtml` 的双向通道：
+
+| 方向 | 通道 |
+|------|------|
+| MATLAB → 前端 | `pfc_ui_push`（写 `h.Data`） |
+| 前端 → MATLAB | `sendEventToMATLAB` → `src/ui/pfc_ui_app.m` 里的 `pfc_ui_event` |
+
+布局、分辨率/DPI 自适应、圆角一律交给 CSS，图表交给 uPlot；MATLAB 侧只有窗口底色和
+「仪器设置」对话框需要自己配色，见 `src/ui/pfc_ui_colors.m`。
+
+算法层不直接碰控件，只通过「UI 适配层」（`src/ui/pfc_ui_html.m`）操作界面：它把界面操作收敛成
+`ui.params() / ui.raw() / ui.debugfv() / ui.outdir() / ui.waveform() / ui.trend() /
+ui.clearTrend() / ui.status()` 八个函数句柄，接口约定与校验见 `src/ui/pfc_ui_check.m`。
+因此 `pfc_run_experiment`、`pfc_oneshot`、`pfc_debug_run`、`pfc_debug_no_mb` 与界面完全无关 ——
+将来要换一种界面实现，算法层一行都不用改。
+
+前端可**脱离 MATLAB 单独在浏览器预览**（自动跑演示数据），调样式很快：
+
+```bash
+cd web && python3 -m http.server 8765   # 打开 http://127.0.0.1:8765
+```
 
 ## 打包成 Windows 独立程序（可选）
 
@@ -126,14 +167,15 @@ pfc_build_exe                  % 编译 exe，并打包安装程序
 pfc_build_exe('noinstaller')   % 只编译 exe
 ```
 
-脚本会先把项目根与 `rigol/` 加进路径再编译 —— mcc 的依赖分析只认「编译时在路径上」的文件，
-漏掉 `rigol/` 会编译通过、exe 一跑才报 `Undefined function 'rigol_xxx'`。
+脚本会先把项目根下所有子目录（`src/`、`rigol/` 等）加进路径再编译 —— mcc 的依赖分析只认
+「编译时在路径上」的文件，漏掉 `src/` 或 `rigol/` 会编译通过、exe 一跑才报 `Undefined function`。
+`web/` 属于静态资源、不在依赖分析范围内，由脚本作为附加文件打进去。
 
 产物在 `build/` 下：
 
 | 文件 | 说明 |
 |------|------|
-| `pfc_app.exe` | 独立程序本体（约 1.5 MB，已内含 `rigol/` 驱动与 `.fig` 界面） |
+| `pfc_app.exe` | 独立程序本体（约 1.5 MB，已内含 `src/`、`rigol/` 驱动与 `web/` 前端资源） |
 | `PFC_Installer_v<版本>.exe` | 分发用安装程序（约 3 MB）；**文件名带版本号**，下载目录里一眼能区分 |
 
 程序内部的程序名固定为 `pfc_app`（不带版本号）—— 若把版本号写进程序名，每版在 Windows 眼里

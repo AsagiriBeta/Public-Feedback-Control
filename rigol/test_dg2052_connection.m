@@ -12,7 +12,7 @@ enable_output_pulse = false;
 
 %% ========== 路径与工具箱 ==========
 rigolDir = fileparts(mfilename('fullpath'));
-addpath(rigolDir);
+addpath(genpath(fileparts(rigolDir)));   % 项目根下全部子目录（rigol_instr_config 会用到 pfc_root）
 
 if isempty(ver('instrument'))
     error('test_dg2052:NoToolbox', '未检测到 Instrument Control Toolbox，无法使用 visadev。');

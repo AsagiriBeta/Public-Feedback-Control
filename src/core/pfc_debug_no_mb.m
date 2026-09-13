@@ -1,15 +1,21 @@
 function result = pfc_debug_no_mb(opts)
 %PFC_DEBUG_NO_MB 未打微泡调试：CW 正弦，示波器 AUTO，RAW 读 CH1 做 FFT。
-% 运行至 STOP FUS。期间可改「2. 超声」里的频率/电压（回车或点别处即下发）。
-if nargin < 1, opts = struct(); end
+% 运行至 STOP FUS。期间可改「1. 采集」里的频率/电压（回车或点别处即下发）。
+% opts.ui 为 UI 适配层（实现见 pfc_ui_html，约定接口见 pfc_ui_check）。
+if nargin < 1
+    opts = struct();
+end
+
+ui = [];
+if isfield(opts, 'ui'), ui = opts.ui; end
+ui = pfc_ui_check(ui);
+
 cfg = rigol_instr_config();
 
 freq = getf(opts, 'freq_mhz', 1.5);
 volt = getf(opts, 'volt_mVpp', 20);
 npts = getf(opts, 'npts', 20000);
 Fs   = getf(opts, 'fs_target', 40e6);
-handles = [];
-if isfield(opts, 'handles'), handles = opts.handles; end
 
 global pfc_abort fgen
 pfc_abort = false;
@@ -25,15 +31,7 @@ trig = max(1e-3, 0.2 * (volt / 1000));
 scope = pfc_visa('scope');
 fgen = pfc_visa('fgen');
 info = rigol_dho814_setup(scope, Fs, npts, cfg.scope_pcd_channel, trig, 'AUTO');
-[freq, volt] = pfc_debug_live('start', handles, freq, volt);
-
-if isempty(handles)
-    fig = figure('Name', 'PFC debug no-MB', 'Color', [0.11 0.12 0.14], ...
-        'Position', [60 80 1100 420]);
-    handles.Signal_plot = subplot(1,2,1);
-    handles.FFT_plot = subplot(1,2,2);
-    handles.PulseNum = [];
-end
+[freq, volt] = pfc_debug_live('start', ui, freq, volt);
 
 rigol_dg2052_output_set(fgen, true);
 pause(0.3);
@@ -48,11 +46,13 @@ try
             break;
         end
         [freq, volt] = pfc_debug_live('get');
-        [chPcd, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, npts, cfg.scope_pcd_channel, 'live');
+        [chPcd, ~, realFs, chTx] = rigol_dho814_acquire_block(scope, npts, cfg.scope_pcd_channel, 'live');
         pulse = pulse + 1;
-        datamat(pulse, :) = chPcd; %#ok<AGROW>
-        txmat(pulse, :) = chTx; %#ok<AGROW>
-        [fpk, dpk] = pfc_update_signal_fft(handles, chTx, dt_ns, realFs, freq, 'CH1 回读 TX');
+        % 采样失败时 acquire_block 返回 []，帧长也可能和上一帧不同：
+        % 先整形成定长行，否则下面的矩阵赋值会因维度不一致直接中断整轮调试。
+        datamat(pulse, :) = pfc_fitrow(chPcd, npts); %#ok<AGROW>
+        txmat(pulse, :) = pfc_fitrow(chTx, npts); %#ok<AGROW>
+        [fpk, dpk] = ui.waveform(chTx, realFs, freq, 'CH1 回读 TX');
         peaks(pulse, :) = [fpk, dpk]; %#ok<AGROW>
         if pulse == 1 && max(abs(chTx)) > 1e-4
             pkTx = max(abs(chTx));
@@ -69,9 +69,7 @@ try
         if ~isfinite(fpk)
             msg = sprintf('调试 CH1 无有效峰（时域 max=%.3g V）  #%d', max(abs(chTx)), pulse);
         end
-        if ~isempty(handles.PulseNum) && isgraphics(handles.PulseNum)
-            set(handles.PulseNum, 'String', msg);
-        end
+        ui.status(msg);
         fprintf('%s\n', msg);
         drawnow;
         pause(0.05);

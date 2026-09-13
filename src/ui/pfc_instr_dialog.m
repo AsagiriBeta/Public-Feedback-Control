@@ -7,7 +7,7 @@ function pfc_instr_dialog()
 %   3) 扫描不到时（没装 NI-VISA、走 LAN 且未广播等）仍可手动输入地址兜底。
 %
 % 保存写入 <工作根>/rigol_config.ini 并断开现有连接，下次采集按新地址重连。
-% 采集进行中不允许打开（调用方已用 pfc_gui_busy 拦截，这里再兜一层）。
+% 采集进行中不允许打开（调用方已用 pfc_visa('is_busy') 拦截，这里再兜一层）。
 C = pfc_ui_colors();
 W = 660;
 H = 480;

@@ -20,7 +20,9 @@ function pfc_build_exe(varargin)
 % 换仪器不必重新编译：运行后在界面点「仪器设置」填 VISA 地址即可。
 noInstaller = any(strcmpi(varargin, 'noinstaller'));
 
-root = fileparts(mfilename('fullpath'));
+% tools/ 的上一级就是项目根。这里刻意不用 pfc_root()：本脚本可能在没跑过
+% pfc_setup 的会话里被调用，直接按自身位置推算最稳。
+root = fileparts(fileparts(mfilename('fullpath')));
 if isempty(root)
     root = pwd;
 end
@@ -36,10 +38,9 @@ if isempty(which('compiler.build.standaloneApplication'))
     error('PFC:build', '未找到 MATLAB Compiler（需单独授权并安装），无法打包。');
 end
 
-% mcc 的依赖分析只认「编译时在路径上」的文件。rigol/ 不在路径上时编译不会报错，
-% 但生成的 exe 运行时才报 Undefined function 'rigol_xxx'。这里与 pfc_app.m 保持一致。
-addpath(root);
-addpath(fullfile(root, 'rigol'));
+% mcc 的依赖分析只认「编译时在路径上」的文件。src/ 或 rigol/ 不在路径上时编译不会报错，
+% 但生成的 exe 运行时才报 Undefined function。这里与 pfc_app.m 的 pfc_setup 保持一致。
+addpath(genpath(root));
 
 if isempty(which('visadev'))
     error('PFC:build', ...
@@ -49,9 +50,15 @@ end
 
 outDir = fullfile(root, 'build');
 
+% web/ 是静态资源，不在 mcc 的依赖分析范围内，必须显式带上，
+% 否则 exe 跑起来会「找不到 index.html」。
+if ~isfile(fullfile(root, 'web', 'index.html'))
+    error('PFC:build:web', '缺少前端资源：%s', fullfile(root, 'web', 'index.html'));
+end
+
 fprintf('[1/2] 编译入口 pfc_app.m （版本 %s）...\n', pfc_version('label'));
 res = compiler.build.standaloneApplication('pfc_app.m', ...
-    'AdditionalFiles', {'MatlabScript_FeedbackControl.fig'}, ...
+    'AdditionalFiles', {'web'}, ...
     'OutputDir', outDir);
 fprintf('      exe 已输出到：%s\n', outDir);
 

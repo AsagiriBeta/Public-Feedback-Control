@@ -8,7 +8,7 @@ function root = pfc_root()
 %       3) ~/.pfc
 %       4) tempdir/PFC
 %
-% 参数存档（pfc_gui_params.mat）、默认数据目录（data/）、仪器配置（rigol_config.ini）
+% 参数存档（pfc_prefs.mat）、默认数据目录（data/）、仪器配置（rigol_config.ini）
 % 都放在该目录下，避免编译后写入只读的 MCR 临时目录导致丢失。
 persistent cached
 if ~isempty(cached)

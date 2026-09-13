@@ -3,8 +3,9 @@ function oneshot_fft_plot()
 % 无换能器/负载时不要运行。参数与 GUI 默认一致：1.5 MHz、20 mVpp。
 thisdir = fileparts(mfilename('fullpath'));
 if ~isdeployed
-    addpath(thisdir);
-    addpath(fileparts(thisdir));
+    % 本脚本在 rigol/ 下，其余代码在 src/ 等目录；按项目根加整棵路径，
+    % 否则间接用到的 pfc_root / pfc_spectrum 之类会找不到。
+    addpath(genpath(fileparts(thisdir)));
 end
 cfg = rigol_instr_config();
 

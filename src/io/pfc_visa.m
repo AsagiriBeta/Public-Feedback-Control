@@ -34,6 +34,8 @@ switch lower(cmd)
         catch
         end
     case 'close'
+        release_dev(pfc_visa_state.scope);
+        release_dev(pfc_visa_state.fgen);
         pfc_visa_state.scope = [];
         pfc_visa_state.fgen = [];
         pfc_visa_state.busy = false;
@@ -54,6 +56,21 @@ switch lower(cmd)
         pfc_visa_state.busy = false;
     otherwise
         error('pfc_visa:cmd', '未知命令 %s', cmd);
+end
+end
+
+function release_dev(dev)
+%RELEASE_DEV 显式关闭 visadev 连接。
+% 只把句柄置空是不够的：连接的真正释放要等 MATLAB 回收对象，而仪器设置里
+% 「先释放再扫描」的时序很紧 —— 回收没跟上就会误判资源被占用（visadevfind 仍列它），
+% 或者 *IDN? 直接失败。delete 是同步关闭，随后 visadevfind 就不会再看到它。
+if isempty(dev)
+    return;
+end
+try
+    delete(dev);
+catch
+    % 已经无效 / 已经关掉了，忽略
 end
 end
 

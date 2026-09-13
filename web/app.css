@@ -1,0 +1,81 @@
+/* PFC 界面样式：与 MATLAB 侧 pfc_ui_colors 同一套配色（改颜色改这里 + pfc_ui_colors） */
+:root{
+  --fig:#111419; --panel:#1A1E25; --border:#303741;
+  --text:#E6EAEF; --muted:#8F99A8;
+  --edit-bg:#101317; --edit-fg:#EDF1F5; --edit-bd:#2A313B;
+  --ax-bg:#111419; --ax-fg:#C7D1E0; --grid:#373E4B;
+  --btn:#3C6BB0; --btn-fg:#fff; --btn2:#303741; --btn2-fg:#DCE2EA;
+  --line:#78ADF2; --ref:#6B788C; --warn:#FF8080; --danger:#BD4540;
+  --r-card:8px; --r-ctl:6px;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{
+  background:var(--fig); color:var(--text);
+  font:13px/1.45 -apple-system,"PingFang SC","Microsoft YaHei UI",Segoe UI,sans-serif;
+  overflow:hidden;
+}
+body.busy{cursor:progress}
+
+/* ---------- 总布局 ---------- */
+.app{
+  height:100vh; display:grid; grid-template-columns:392px 1fr;
+  gap:10px; padding:10px;
+}
+.col-left{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto}
+.col-right{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;
+           gap:10px;min-height:0}
+
+/* ---------- 卡片 ---------- */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);
+      padding:10px 12px 12px}
+.card > h2{margin:0 0 9px;font-size:12px;font-weight:600;color:var(--text);letter-spacing:.2px}
+.card > h2 .en{color:var(--muted);font-weight:400;margin-left:4px}
+
+/* ---------- 表单行 ---------- */
+.row{display:grid;grid-template-columns:74px 1fr 46px;align-items:center;gap:6px;margin-bottom:6px}
+.row > label{color:var(--text);font-size:12px;text-align:right}
+.row > .unit{color:var(--muted);font-size:11px}
+input[type=text],input[type=number]{
+  width:100%;background:var(--edit-bg);color:var(--edit-fg);
+  border:1px solid var(--edit-bd);border-radius:var(--r-ctl);
+  padding:5px 7px;font:12px/1.3 inherit;outline:none;
+}
+input:focus{border-color:var(--btn)}
+input::-webkit-outer-spin-button,input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type=number]{-moz-appearance:textfield}
+
+/* ---------- 按钮 ---------- */
+button{
+  font:600 12px/1 inherit;color:var(--btn-fg);background:var(--btn);
+  border:none;border-radius:var(--r-ctl);padding:8px 10px;cursor:pointer;
+  transition:filter .12s,background .12s;
+}
+button:hover:not(:disabled){filter:brightness(1.12)}
+button:active:not(:disabled){filter:brightness(.92)}
+button:disabled{background:#2A313B;color:#6E7783;cursor:not-allowed}
+button.ghost{background:var(--btn2);color:var(--btn2-fg)}
+button.danger{background:var(--danger);color:#fff}
+.btns{display:flex;gap:6px;margin-top:8px}
+.btns > button{flex:1}
+
+/* ---------- 图表 ---------- */
+.chart-cell{background:var(--ax-bg);border:1px solid var(--border);border-radius:var(--r-card);
+            display:flex;flex-direction:column;min-height:0;min-width:0;overflow:hidden}
+.chart-title{padding:6px 10px 0;font-size:11.5px;color:var(--ax-fg);white-space:nowrap;
+             overflow:hidden;text-overflow:ellipsis}
+.chart-title .en{color:var(--muted)}
+.chart-box{flex:1;min-height:0;min-width:0;padding:2px 4px 4px}
+
+/* ---------- 右下角状态 + STOP ---------- */
+.status-cell{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);
+             display:flex;flex-direction:column;padding:10px 12px;min-height:0;gap:8px}
+.status-label{font-size:11.5px;color:var(--muted)}
+.status-text{
+  flex:1;min-height:0;background:var(--edit-bg);border:1px solid var(--edit-bd);
+  border-radius:var(--r-ctl);padding:8px 10px;font-size:13px;color:var(--text);
+  overflow:auto;word-break:break-all;
+}
+.status-text .warn{color:var(--warn)}
+button.stop{font-size:16px;padding:14px 10px;letter-spacing:1px}

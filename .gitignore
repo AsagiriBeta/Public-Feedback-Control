@@ -40,4 +40,5 @@ pfc_update.ini
 .vscode/
 .cursor/
 .codebuddy/
+.playwright-cli/           # 浏览器调试（预览 web/ 前端）留下的快照与日志
 *.code-workspace

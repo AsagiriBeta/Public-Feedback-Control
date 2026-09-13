@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>PFC · DHO814 / DG2052</title>
+<link rel="stylesheet" href="vendor/uPlot.min.css">
+<link rel="stylesheet" href="app.css">
+<script src="vendor/uplot.iife.min.js"></script>
+<script src="app.js"></script>
+<script defer src="vendor/alpine.min.js"></script>
+</head>
+<!-- 参数名与 MATLAB 侧存档字段一致（pfc_gui_params），两边共用一套词汇，
+     所以从 GUIDE 切到本界面、或「检查更新」升级后，参数都不会丢。 -->
+<body x-data="pfcApp()" :class="{busy:busy}">
+
+<div class="app">
+
+  <!-- ============ 左列 ============ -->
+  <div class="col-left">
+
+    <section class="card">
+      <h2>0. 文件 <span class="en">/ File</span></h2>
+      <div class="row" style="grid-template-columns:74px 1fr 84px">
+        <label>文件名 ID</label>
+        <input type="text" x-model="p.studyID" @input="pushParams(false)" @change="pushParams(true)" placeholder="Enter Mice ID ex:P0001">
+        <button class="ghost" @click="action('update')" :disabled="busy">检查更新</button>
+      </div>
+      <div class="row" style="grid-template-columns:74px 84px 1fr">
+        <label>保存目录</label>
+        <button class="ghost" @click="action('browse')" :disabled="busy">浏览</button>
+        <input type="text" x-model="p.directory" @input="pushParams(false)" @change="pushParams(true)" placeholder="choose directory...">
+      </div>
+      <div class="btns">
+        <button class="ghost" @click="action('instr')" :disabled="busy">仪器设置</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>1. CH1 回读 <span class="en">/ Readback · FFT</span></h2>
+      <div class="row">
+        <label>频率</label>
+        <input type="number" step="0.01" x-model.number="p.dbg_freq" @input="pushParams(false)" @change="pushParams(true)">
+        <span class="unit">MHz</span>
+      </div>
+      <div class="row">
+        <label>电压</label>
+        <input type="number" step="1" x-model.number="p.dbg_volt" @input="pushParams(false)" @change="pushParams(true)">
+        <span class="unit">mVpp</span>
+      </div>
+      <div class="btns">
+        <button @click="action('oneshot')" :disabled="busy">单次 One-shot</button>
+        <button @click="action('debug')" :disabled="busy">连续调试 Debug</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>超声参数 <span class="en">(2 / 3 / 4 共用)</span></h2>
+      <div class="row">
+        <label>频率</label>
+        <input type="number" step="0.01" x-model.number="p.freq_mhz" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">MHz</span>
+      </div>
+      <div class="row">
+        <label>电压</label>
+        <input type="number" step="1" x-model.number="p.volt_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">mVpp</span>
+      </div>
+      <div class="row">
+        <label>PRF</label>
+        <input type="number" step="0.1" x-model.number="p.prf_hz" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">Hz</span>
+      </div>
+      <div class="row">
+        <label>周期数</label>
+        <input type="number" step="1" x-model.number="p.n_cycle" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">cyc</span>
+      </div>
+      <div class="row">
+        <label>时长</label>
+        <input type="number" step="1" x-model.number="p.duration_s" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">s</span>
+      </div>
+      <div class="row">
+        <label>采样点</label>
+        <input type="number" step="1024" x-model.number="p.npts" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">pts</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>2–3. 开环 CH2</h2>
+      <div class="btns">
+        <button @click="action('noMB')" :disabled="busy">2. 无微泡</button>
+        <button @click="action('openMB')" :disabled="busy">3. 有微泡开环</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>4. 闭环反馈 <span class="en">/ Feedback</span></h2>
+      <div class="row">
+        <label>目标</label>
+        <input type="number" step="0.1" x-model.number="p.target_db" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">dB</span>
+      </div>
+      <div class="row">
+        <label>闭环上限</label>
+        <input type="number" step="1" x-model.number="p.max_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">mVpp</span>
+      </div>
+      <div class="btns">
+        <button @click="action('feedback')" :disabled="busy">4. 开始闭环 Feedback</button>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ============ 右列 ============ -->
+  <div class="col-right">
+
+    <div class="chart-cell">
+      <div class="chart-title">时域 <span class="en">Time</span></div>
+      <div class="chart-box" id="ch-time"></div>
+    </div>
+
+    <div class="chart-cell">
+      <div class="chart-title">频谱 <span class="en">FFT</span></div>
+      <div class="chart-box" id="ch-fft"></div>
+    </div>
+
+    <div class="chart-cell">
+      <div class="chart-title">电压 <span class="en">Voltage (mVpp)</span></div>
+      <div class="chart-box" id="ch-volt"></div>
+    </div>
+
+    <div class="chart-cell">
+      <div class="chart-title">稳态空化 <span class="en">SC · 2f</span></div>
+      <div class="chart-box" id="ch-sc"></div>
+    </div>
+
+    <div class="chart-cell">
+      <div class="chart-title">惯性空化 <span class="en">IC · 3.3 MHz</span></div>
+      <div class="chart-box" id="ch-ic"></div>
+    </div>
+
+    <div class="status-cell">
+      <div class="status-label">脉冲 <span class="en">Pulse #</span></div>
+      <div class="status-text" x-text="status"></div>
+      <button class="danger stop" @click="action('stop')">停止超声 STOP FUS</button>
+    </div>
+
+  </div>
+</div>
+
+</body>
+</html>
