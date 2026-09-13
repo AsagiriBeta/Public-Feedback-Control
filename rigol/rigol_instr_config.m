@@ -78,6 +78,9 @@ cfg.awg_channel       = 1;
 
 cfg.acquire_timeout_s = 12;
 
+cfg.scope_vdiv = 8;                % 竖直方向格数：波形以 0 V 居中 -> 满量程 ±(vdiv/2)×SCALe
+                                   % 削顶判定（rigol_dho814_clipped）要用它，别乱改
+
 cfg.harmonic_bandwidth_hz = 20e3;  % Chien 2022：SC/IC 均为 ±20 kHz
 end
 
@@ -93,7 +96,7 @@ if ~isfile(f)
 end
 % 只接受白名单键，避免误改内部字段
 numKeys = {'scope_tx_channel', 'scope_pcd_channel', 'awg_channel', 'acquire_timeout_s', ...
-    'harmonic_bandwidth_hz'};
+    'harmonic_bandwidth_hz', 'scope_vdiv'};
 strKeys = {'scope_visa', 'awg_visa'};
 try
     lines = splitlines(fileread(f));

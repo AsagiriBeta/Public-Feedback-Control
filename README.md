@@ -32,6 +32,61 @@ rigol_instr_config('save', cfg);            % 落盘
 
 DHO814 **没有 EXT 口**，因此用 CH1 边沿触发每一发。无换能器/50 Ω 负载时不要打开射频输出。
 
+## 采集链（改之前先读这一节）
+
+下面三条都是拿真实数据定位出来的，改动前请确认没有把问题放回去。改完跑一次：
+
+```matlab
+pfc_selftest_acquisition     % 不需要接仪器
+```
+
+### 1. 波形必须用 WORD 读，不要改回 BYTE
+
+`rigol_dho814_read_channel.m` 用 `:WAVeform:FORMat WORD`。DHO814 是 12 位 ADC，
+BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 IC 频带（3.3 MHz 一带）
+的信号只有 20–95 µV，而 BYTE 的量化噪声 RMS 就有约 72 µV —— 那时**测到的全是量化
+本底**。现在读 16 位容器（有效 12 位），字节序在 `:WAVeform:BYTeorder LSBFirst`
+里显式声明，解码在 `rigol_decode_waveform.m`（手写字节拼装，不依赖宿主机字节序）。
+
+### 2. CH2 量程要留余量，削顶帧必须重采
+
+量程照**上一帧**峰值定（`pfc_run_experiment` 的 `set_ranges`，系数 `K=1.4`：
+满量程 ≈ 2.8× 峰值）。旧的 `/3.2` 余量只有 36%，信号一变大就顶穿量程。
+
+为什么必须拦：**对称削顶只生奇次谐波**（3f/5f），偶次反而被压掉。实测那一轮里，
+被削顶的 4 帧（第 17/51/78/79 帧）3f 电平比中位帧虚高约 45 dB，波峰因数一致落在
+1.09–1.20（正常帧 2.8–9.1）。不剔除的话，闭环会把 3f 的假性飙升当成「空化增强」
+去追目标值。
+
+判定在 `rigol_dho814_clipped.m`：峰值贴到满量程 98% 即判削顶，满量程 =
+`scope_vdiv`/2 × SCALe（波形以 0 V 居中）。用「是否贴住量程」而不是「波峰因数」
+判，是因为波峰因数会随猝发在窗内占多大比例而漂，满量程是硬边界。
+
+> 事后怎么判断一帧有没有被削顶：算 `峰值 / ( scope_vdiv/2 × SCALe )`。真削顶的帧
+> 这个比值**跨帧完全一致**（实测 4 帧全等于 1.092，而它们的量程各不相同）——
+> 被硬性钉在量程上限就是这个指纹；正常帧该比值明显小于 1。
+
+### 3. 水平偏移必须显式归零
+
+`rigol_dho814_setup.m` 里 `:TIMebase:MAIN:OFFSet 0`。以前从不设置它、用的是仪器
+残留状态：实测某轮 92 帧里 1 ms 的猝发只有 0.42 ms 落在采集窗内（猝发起点一致在
+1.180 ms、零抖动）。后果是 SC/IC 被占空比稀释约 11 dB，而且**稀释系数取决于一个
+不受控的参数** —— 换台机器、或有人动过面板，标定就变了。
+
+每轮采集开始时 `check_burst_window` 会量一次猝发位置、打一行报告，并随数据存盘
+（`burst_align`）。那行提示「未对齐」时，需要到示波器面板上确认水平位置。
+
+### 存进 .mat 的采集质量元数据
+
+| 字段 | 含义 |
+|------|------|
+| `n_clip_retry` | 因削顶被丢弃并重采的帧数（>0 说明量程偏紧） |
+| `n_prime_discard` | 只为标定量程而未入库的帧数（正常为 1） |
+| `pcd_scale_vdiv` / `tx_scale_vdiv` | 结束时 CH1/CH2 的量程 (V/div)，解释竖直分辨率 |
+| `timebase_offset_s` | 采集时实际生效的水平偏移 |
+| `burst_align` | 猝发在窗内的位置：`burst_s` / `win_s` / `start_s` / `in_window` |
+| `waveform_format` | `WORD`（16 位容器 / 12 位 ADC） |
+
 ## 运行
 
 需要：**MATLAB R2020b+**（本机为 R2026a）、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
@@ -71,6 +126,7 @@ Public-Feedback-Control/
 ├── rigol/                RIGOL DHO814 / DG2052 驱动与自检、单次收发
 ├── web/                  新版界面前端：index.html + Alpine.js + uPlot（离线静态资源）
 ├── tools/                构建与发布脚本（不参与运行）：pfc_build_exe / pfc_release
+├── tests/                不依赖硬件的自检：pfc_selftest_acquisition
 ├── data/                 采集默认保存目录（不入库）
 └── manuals/              厂商手册副本（不入库）
 ```
@@ -94,6 +150,8 @@ Public-Feedback-Control/
 | `src/io/pfc_prefs.m` | 界面参数持久化 |
 | `src/io/pfc_update.m` | 检查更新（默认源写死 + 本地 `pfc_update.ini` 覆盖） |
 | `rigol/rigol_scan_instruments.m` / `rigol_visa_table.m` | 仪器自动扫描 / `visadevlist` 返回值解析 |
+| `rigol/rigol_decode_waveform.m` / `rigol_dho814_clipped.m` | 波形解码（WORD/BYTE）／削顶判定 |
+| `tests/pfc_selftest_acquisition.m` | 采集链自检（不需要仪器） |
 
 幅度单位为 **mVpp**。本实验室无位移台，电机区已从界面隐藏。
 

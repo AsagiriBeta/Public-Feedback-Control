@@ -25,9 +25,13 @@ end
 vpp_v = max(v_out, 1) / 1000;
 trig = max(0.002, min(0.12 * vpp_v, 0.30 * (vpp_v / 2)));
 info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle');
-tx_scale = max(0.001, vpp_v / 3);
-writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, tx_scale));
-writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, max(0.005, tx_scale)));
+% 量程系数 K = 「满量程 ≈ K × 本帧峰值」。K=1.4 -> 满量程 ≈ 2.8× 峰值，能扛住一次
+% 接近 3 倍的帧间跳变（真出空化时信号恰恰会突然变大）。K 太小会削顶 —— 对称削顶
+% 会长出 3f/5f 假峰，闭环会去追假信号；K 太大则白白浪费竖直分辨率。
+scTx  = max(0.001, vpp_v / 1.4);
+scPcd = max(0.001, vpp_v / 1.4);
+writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
+writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
 fprintf('PFC 输出 %.4g mVpp  触发 %.3g mV  （MaxV 仅用于闭环）\n', v_out, trig * 1e3);
 
 ui.clearTrend();
@@ -42,10 +46,12 @@ ICrec = [];
 peaks_ch1 = [];
 harm_db = [];
 pulse = 0;
-scaled = false;
 save_path = '';
 n_good = 0;
 prefix = '';
+n_clip = 0;      % 因削顶被丢弃并重采的帧数
+n_prime = 0;     % 仅用于标定量程、未入库的帧数
+align = struct();% 采集窗对齐自检结果（随数据存盘）
 
 try
     if any(strcmp(mode, {'during', 'feedback'}))
@@ -132,6 +138,14 @@ result = save_now();
         S.studyID = p.studyID;
         S.mb_injection = 'continuous_infusion';
         S.note = 'burst; CH1 TX + CH2 PCD RAW; CH1 edge; MB pump assumed already on';
+        % 采集质量元数据：以后复查数据时，这些值决定「这一帧能不能用」
+        S.n_clip_retry = n_clip;         % >0 说明量程偏紧，削顶帧已重采
+        S.n_prime_discard = n_prime;     % 只为标定量程而丢弃的帧数
+        S.pcd_scale_vdiv = scPcd;        % CH2 最终量程 (V/div)，解释竖直分辨率
+        S.tx_scale_vdiv = scTx;
+        S.timebase_offset_s = info.time_offset_s;
+        S.burst_align = align;           % 猝发在采集窗里的位置（对齐自检）
+        S.waveform_format = info.waveform_format;   % WORD = 16 位容器 / 12 位 ADC
     end
 
     function run_loop(dur_s, max_pulses, volt, do_fb, label, sc_tgt, sc_hi, sc_lo, max_mVpp)
@@ -142,6 +156,8 @@ result = save_now();
         ramping = true;
         t1 = tic;
         n0 = n_good;
+        prime = true;      % 第一发：只用来标定量程与校验采集窗
+        clip_retry = 0;    % 连续削顶重采计数（限次，避免一直空转）
         while true
             if pfc_abort
                 break;
@@ -174,6 +190,28 @@ result = save_now();
             if isfinite(realFs) && realFs > 0
                 info.realFs = realFs;
             end
+            % 第一发只用来标定量程 + 校验采集窗，不入库：量程若按循环前的初值走，
+            % 第一帧的竖直分辨率会被白白浪费（实测那一帧的 SC 值是其余帧的 8 倍，
+            % 纯粹是量程太宽带来的量化误差）。
+            if prime
+                prime = false;
+                n_prime = n_prime + 1;
+                [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
+                align = check_burst_window(chTx, info.realFs, p);
+                continue;
+            end
+            % 削顶检测：量程是照上一帧峰值定的，信号突然变大就顶穿量程。对称削顶会
+            % 凭空长出 3f/5f 假峰（实测能虚高 45 dB，闭环会把它当「空化增强」去追），
+            % 所以判本帧作废、扩量程重采，而不是将就记录。
+            if clip_retry < 3 && ...
+                    (rigol_dho814_clipped(chTx, scTx) || rigol_dho814_clipped(chPcd, scPcd))
+                clip_retry = clip_retry + 1;
+                n_clip = n_clip + 1;
+                [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
+                ui.status(sprintf('%s  检测到削顶，扩量程重采（第 %d 次）', label, clip_retry));
+                continue;
+            end
+            clip_retry = 0;
             pulse = pulse + 1;
             n_good = n_good + 1;
             k = n_good;
@@ -193,15 +231,8 @@ result = save_now();
             [F1, ~, db1] = pfc_spectrum(txmat(k, :), info.realFs);
             [ch1pk, ch1db] = pfc_fft_peak_mhz(F1, db1, 0.3, 8);
             peaks_ch1(k, :) = [ch1pk, ch1db]; %#ok<AGROW>
-            if max(abs(chTx)) > 1e-4
-                writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, ...
-                    min(1.0, max(0.001, max(abs(chTx)) / 3.2))));
-                scaled = true; %#ok<NASGU>
-            end
-            if max(abs(chPcd)) > 1e-4
-                writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, ...
-                    min(1.0, max(0.002, max(abs(chPcd)) / 3.2))));
-            end
+            % 按本帧峰值给下一帧定量程（帧首的削顶检查用的就是这两个值）
+            [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
             ui.trend(k, sc, ic, volt, max(30, k + 12), max(volt * 1.5, 40));
             ok1 = isfinite(ch1pk) && abs(ch1pk - p.freq_mhz) < 0.25;
             fprintf('%s  #%d  CH1 %s  CH2 2f(%.2f MHz)=%.1f dB  f/2=%.1f dB\n', ...
@@ -236,6 +267,55 @@ cfg = rigol_instr_config();
 rigol_dg2052_apply_burst(fgen, cfg.awg_channel, p.freq_mhz, volt, 0, p.n_cycle, p.period_s);
 rigol_dg2052_output_set(fgen, true);
 pause(p.period_s + 0.15);
+end
+
+function [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd)
+%SET_RANGES 按本帧峰值给下一帧定量程：满量程 ≈ K × 峰值，留出帧间跳变余量。
+% 峰值太弱（<0.1 mV）时保持原量程不动 —— 否则会把量程一路压进噪声里，
+% 后面任何一次正常大小的信号都会削顶。
+K = 1.4;
+scTx  = next_scale(scTx,  max(abs(chTx)),  0.001, K);
+scPcd = next_scale(scPcd, max(abs(chPcd)), 0.002, K);
+writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
+writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+end
+
+function sc = next_scale(sc, pk, floor_vdiv, K)
+if isfinite(pk) && pk > 1e-4
+    sc = min(1.0, max(floor_vdiv, pk / K));
+end
+end
+
+function a = check_burst_window(chTx, fs, p)
+%CHECK_BURST_WINDOW 量一次猝发在采集窗里的位置，偏了就把话说清楚。
+% 窗没对齐是「静默」错误：频谱照样出峰，但 SC/IC 会被占空比稀释（实测差约 11 dB），
+% 而且稀释系数取决于 :TIMebase:MAIN:OFFSet 这个本来不受控的仪器状态。
+% setup 里已把它显式归零，这里量一次结果、随数据存盘，免得以后再靠猜。
+a = struct('burst_s', NaN, 'win_s', NaN, 'start_s', NaN, 'in_window', NaN);
+if isempty(chTx) || ~isfinite(fs) || fs <= 0
+    return;
+end
+win_s = numel(chTx) / fs;
+burst_s = p.n_cycle / (p.freq_mhz * 1e6);
+env = abs(chTx);
+pk = max(env);
+if ~(pk > 1e-5)
+    fprintf('注意：CH1 里找不到猝发（回读幅度过小），无法校验采集窗对齐。\n');
+    return;
+end
+start_s = (find(env > 0.25 * pk, 1, 'first') - 1) / fs;
+inside = min(1, max(0, (win_s - start_s) / burst_s));
+a = struct('burst_s', burst_s, 'win_s', win_s, 'start_s', start_s, 'in_window', inside);
+if inside < 0.9
+    fprintf(['【采集窗未对齐】猝发 %.3f ms、窗 %.3f ms，猝发从窗内 %.3f ms 才开始，' ...
+        '只有 %.0f%% 在窗内。\n' ...
+        '  SC/IC 会被占空比稀释、标定不稳。setup 已把 :TIMebase:MAIN:OFFSet 归零，' ...
+        '若此处仍偏，说明水平位置还受别的设置影响，需在示波器上确认。\n'], ...
+        burst_s * 1e3, win_s * 1e3, start_s * 1e3, inside * 100);
+else
+    fprintf('采集窗对齐 OK：猝发 %.3f ms 全部在窗内（起点 %.3f ms，窗 %.3f ms）\n', ...
+        burst_s * 1e3, start_s * 1e3, win_s * 1e3);
+end
 end
 
 function tf = frame_ok(chPcd, chTx)

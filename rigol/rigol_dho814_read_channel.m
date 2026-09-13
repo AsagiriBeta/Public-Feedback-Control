@@ -1,12 +1,22 @@
 function [y, xinc] = rigol_dho814_read_channel(dev, ch, npts, wavemode)
-%RIGOL_DHO814_READ_CHANNEL STOP 后读取通道。BYTE 更稳；不把短波形补零（避免假 FFT 峰）。
+%RIGOL_DHO814_READ_CHANNEL STOP 后读取通道。
+%
+% 用 WORD（16 位）而不是 BYTE（8 位）：DHO814 是 12 位 ADC，BYTE 读回来只剩 8 位，
+% 白扔 24 dB 动态范围。实测某轮数据里 IC 频带（3.3 MHz 一带）的信号只有 20–95 µV，
+% 而 BYTE 的量化噪声 RMS 就有约 72 µV —— 那时测到的全是量化本底，不是空化宽带。
+%
+% 不把短波形补零（避免假 FFT 峰）。
 if nargin < 4 || isempty(wavemode)
     wavemode = 'RAW';
 end
+FMT = 'WORD';                          % 想退回 8 位就改这里（decode 两条分支都在）
+
 chan = sprintf('CHANnel%d', ch);
 writeline(dev, sprintf(':WAVeform:SOURce %s', chan));
 writeline(dev, sprintf(':WAVeform:MODE %s', wavemode));
-writeline(dev, ':WAVeform:FORMat BYTE');
+writeline(dev, sprintf(':WAVeform:FORMat %s', FMT));
+% 显式声明字节序，别依赖仪器默认值 —— WORD 下解错字节序会得到完全错误的波形
+writeline(dev, ':WAVeform:BYTeorder LSBFirst');
 if strcmpi(wavemode, 'RAW')
     writeline(dev, sprintf(':WAVeform:POINts %d', npts));
     writeline(dev, ':WAVeform:STARt 1');
@@ -28,6 +38,8 @@ end
 if ~(isfinite(xinc) && xinc > 0)
     error('rigol:dho814:xinc', 'CH%d XINCrement 无效', ch);
 end
+if ~isfinite(yor), yor = 0; end
+if ~isfinite(yref), yref = 0; end
 
 writeline(dev, ':WAVeform:DATA?');
 payload = rigol_read_ieee_block_binary(dev);
@@ -35,7 +47,7 @@ if isempty(payload)
     error('rigol:dho814:waveform', '未读到 CH%d 波形', ch);
 end
 
-raw = double(payload(:)).';
+raw = rigol_decode_waveform(payload, FMT);
 y = (raw - yor - yref) .* yinc;
 if isfinite(nact) && nact > 0 && numel(y) > nact
     y = y(1:nact);

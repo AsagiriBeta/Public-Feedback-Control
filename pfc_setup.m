@@ -9,6 +9,7 @@ function root = pfc_setup()
 %   src/io    仪器与配置（VISA、参数存档、检查更新）
 %   rigol     RIGOL DHO814 / DG2052 驱动
 %   tools     构建与发布脚本（不参与运行）
+%   tests     不依赖硬件的自检
 %   web       界面前端静态资源（HTML/CSS/JS）
 %
 % 开发时一般不用手动调用：直接从项目根运行 pfc_app 即可，它会自动调用本函数。
