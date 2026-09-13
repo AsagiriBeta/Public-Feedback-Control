@@ -11,7 +11,7 @@ function varargout = pfc_version(cmd, varargin)
 %
 % 比较规则：只取每段开头的数字，'v' 前缀忽略，缺的段按 0 补。
 % 所以 '1.2' 与 '1.2.0' 相同，'1.0.0-rc1' 按 '1.0.0' 处理。
-v = '0.1.3';
+v = '0.1.4';
 
 if nargin < 1 || isempty(cmd)
     varargout{1} = v;
