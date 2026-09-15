@@ -14,11 +14,17 @@ end
 
 C = pfc_ui_colors();
 scr = get(0, 'ScreenSize');
-W = min(1500, max(1080, scr(3) - 80));
-H = min(940, max(700, scr(4) - 130));
+% 先按「舒服的默认尺寸」估，再钳进当前屏，避免高 DPI / 小笔记本上窗口伸出屏幕，
+% 把右下角 STOP 裁到任务栏下面。
+availW = max(640, scr(3) - 40);
+availH = max(480, scr(4) - 80);
+W = min([1500, max(1080, scr(3) - 80), availW]);
+H = min([940, max(700, scr(4) - 130), availH]);
+left = max(10, min(60, scr(3) - W - 10));
+bottom = max(10, min(60, scr(4) - H - 10));
 
 fig = uifigure('Name', ['PFC  ·  DHO814 / DG2052  ·  ' pfc_version('label')], ...
-    'Color', C.fig, 'Position', [60 60 W H]);
+    'Color', C.fig, 'Position', [left bottom W H]);
 
 try
     g = uigridlayout(fig, [1 1]);

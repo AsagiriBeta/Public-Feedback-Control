@@ -10,7 +10,7 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%;margin:0}
+html,body{height:100%;margin:0;max-height:100%}
 body{
   background:var(--fig); color:var(--text);
   font:13px/1.45 -apple-system,"PingFang SC","Microsoft YaHei UI",Segoe UI,sans-serif;
@@ -19,13 +19,24 @@ body{
 body.busy{cursor:progress}
 
 /* ---------- 总布局 ---------- */
+/* 用 100% 而不是 100vh：MATLAB uihtml 里 vh 经常比可见区域高一截，
+   右下角 STOP 会被裁掉。矮屏时左右栏各自滚动，互不影响。 */
 .app{
-  height:100vh; display:grid; grid-template-columns:392px 1fr;
+  height:100%; max-height:100%; min-height:0;
+  display:grid; grid-template-columns:minmax(300px,392px) minmax(0,1fr);
   gap:10px; padding:10px;
 }
-.col-left{display:flex;flex-direction:column;gap:8px;min-height:0;overflow:auto}
-.col-right{display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr 1fr;
-           gap:10px;min-height:0}
+.col-left,.col-right{
+  min-height:0; overflow:auto; overscroll-behavior:contain;
+  scrollbar-width:thin; scrollbar-color:#3A4350 transparent;
+}
+.col-left::-webkit-scrollbar,.col-right::-webkit-scrollbar{width:8px;height:8px}
+.col-left::-webkit-scrollbar-thumb,.col-right::-webkit-scrollbar-thumb{
+  background:#3A4350; border-radius:8px;
+}
+.col-left{display:flex;flex-direction:column;gap:8px}
+.col-right{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);
+           grid-template-rows:repeat(3, minmax(168px,1fr)); gap:10px}
 
 /* ---------- 卡片 ---------- */
 .card{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);
@@ -70,12 +81,12 @@ button.danger{background:var(--danger);color:#fff}
 
 /* ---------- 右下角状态 + STOP ---------- */
 .status-cell{background:var(--panel);border:1px solid var(--border);border-radius:var(--r-card);
-             display:flex;flex-direction:column;padding:10px 12px;min-height:0;gap:8px}
-.status-label{font-size:11.5px;color:var(--muted)}
+             display:flex;flex-direction:column;padding:10px 12px;min-height:148px;gap:8px}
+.status-label{font-size:11.5px;color:var(--muted);flex-shrink:0}
 .status-text{
-  flex:1;min-height:0;background:var(--edit-bg);border:1px solid var(--edit-bd);
+  flex:1;min-height:36px;background:var(--edit-bg);border:1px solid var(--edit-bd);
   border-radius:var(--r-ctl);padding:8px 10px;font-size:13px;color:var(--text);
   overflow:auto;word-break:break-all;
 }
 .status-text .warn{color:var(--warn)}
-button.stop{font-size:16px;padding:14px 10px;letter-spacing:1px}
+button.stop{flex-shrink:0;font-size:16px;padding:14px 10px;letter-spacing:1px}

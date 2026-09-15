@@ -77,7 +77,8 @@
   function mkChart(el, opts) {
     var w = el.clientWidth || 400, h = el.clientHeight || 180;
     return new uPlot(Object.assign({
-      width: w, height: h, legend: { show: false }, cursor: { show: false },
+      width: w, height: h, legend: { show: false },
+      cursor: { show: false, drag: { x: false, y: false, setScale: false } },
       scales: { x: { time: false } }
     }, opts), [[], []], el);
   }
@@ -114,6 +115,14 @@
           { axes: [axisX('Pulse #'), axisY('IC')], series: [{}, dotSeries()] });
 
         window.addEventListener('resize', function () { self.resizeCharts(); });
+        // uihtml 改尺寸经常不触发 window.resize；图表格子自己变了再跟上。
+        if (typeof ResizeObserver !== 'undefined') {
+          var ro = new ResizeObserver(function () { self.resizeCharts(); });
+          ['#ch-time', '#ch-fft', '#ch-volt', '#ch-sc', '#ch-ic'].forEach(function (sel) {
+            var el = self.$el.querySelector(sel);
+            if (el) { ro.observe(el); }
+          });
+        }
         setTimeout(function () { self.resizeCharts(); }, 60);
 
         // 接上 MATLAB 数据；若在浏览器里单独打开则跑演示数据
@@ -124,11 +133,16 @@
 
       resizeCharts: function () {
         var self = this;
-        ['time', 'fft', 'volt', 'sc', 'ic'].forEach(function (k) {
-          var u = self.charts[k]; if (!u) { return; }
-          var el = u.root.parentNode;
-          var w = el.clientWidth, h = el.clientHeight;
-          if (w > 10 && h > 10) { u.setSize({ width: w, height: h }); }
+        if (this._rzPending) { return; }
+        this._rzPending = true;
+        requestAnimationFrame(function () {
+          self._rzPending = false;
+          ['time', 'fft', 'volt', 'sc', 'ic'].forEach(function (k) {
+            var u = self.charts[k]; if (!u) { return; }
+            var el = u.root.parentNode;
+            var w = el.clientWidth, h = el.clientHeight;
+            if (w > 10 && h > 10) { u.setSize({ width: w, height: h }); }
+          });
         });
       },
 
