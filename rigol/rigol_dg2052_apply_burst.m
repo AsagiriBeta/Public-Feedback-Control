@@ -6,17 +6,16 @@ if ~(isscalar(period_s) && isnumeric(period_s) && isfinite(period_s) && period_s
     error('rigol:dg2052:period', 'period_s 须为有限正标量（猝发周期 = 1/PRF）。');
 end
 src = sprintf('SOURce%d', ch);
-out = sprintf('OUTPut%d', ch);
 freq_hz = freq_mhz * 1e6;
 vpp = ampl_mVpp / 1000;
 nc = max(1, round(n_cycle));
 
+rigol_dg2052_load(dev, ch);
 writeline(dev, sprintf(':%s:FUNCtion SINusoid', src));
 writeline(dev, sprintf(':%s:FREQuency %.12g', src, freq_hz));
 writeline(dev, sprintf(':%s:VOLTage:UNIT VPP', src));
 writeline(dev, sprintf(':%s:VOLTage %.12g', src, vpp));
 writeline(dev, sprintf(':%s:PHASe %.12g', src, phase_deg));
-writeline(dev, sprintf(':%s:LOAD INFinity', out));
 
 writeline(dev, sprintf(':%s:BURSt:MODE TRIG', src));
 writeline(dev, sprintf(':%s:BURSt:STATe ON', src));

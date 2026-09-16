@@ -32,7 +32,7 @@ end
 if ~(isfinite(p.volt_mVpp) && p.volt_mVpp > 0)
     error('pfc:params', '请填写有效的 FUS 电压 (mVpp)。');
 end
-% DG2052 高阻常见 1 mVpp–10 Vpp；20 mV 与 500 mV 都合法，不要额外截断。
+% DG2052 在 50 Ω 负载下常见 1 mVpp–10 Vpp；20 mV 与 500 mV 都合法，不要额外截断。
 if p.volt_mVpp > 10000
     error('pfc:params', '电压 %.4g mVpp 超过 10 Vpp，请确认单位是 mVpp。', p.volt_mVpp);
 end

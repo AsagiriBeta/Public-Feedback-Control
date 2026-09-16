@@ -25,6 +25,11 @@ chTx = [];
 xinc = NaN;
 try
     if strcmpi(mode, 'live')
+        % RAW 只能在 STOP 后读。调试若只 STOP 不 RUN，第一帧用的是 setup 里
+        % 已经采满的缓冲，看起来正常；第二帧起仪器一直停着，读到的还是同一屏，
+        % 改完量程后 :WAVeform:DATA? 还可能一直等到超时 —— 界面就像卡在 #1。
+        writeline(dev, ':RUN');
+        pause(0.12);
         writeline(dev, ':STOP');
         pause(0.05);
     else
@@ -55,6 +60,10 @@ try
         if ~(isfinite(xinc) && xinc > 0) && isfinite(x2) && x2 > 0
             xinc = x2;
         end
+    end
+    if strcmpi(mode, 'live')
+        % 读完重新跑起来，示波器屏幕才不会冻住，下一圈 :RUN 也有新数据可停。
+        try, writeline(dev, ':RUN'); catch, end
     end
 catch
     chPcd = [];

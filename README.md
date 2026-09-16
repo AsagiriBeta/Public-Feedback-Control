@@ -111,7 +111,7 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 
 ## 运行
 
-需要：**MATLAB R2020b+**（本机为 R2026a）、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
+需要：**MATLAB R2026a**、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
 
 ```matlab
 cd('<项目目录>')     % 例如 D:\Projects\Public-Feedback-Control
