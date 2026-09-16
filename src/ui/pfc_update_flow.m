@@ -2,7 +2,9 @@ function pfc_update_flow(fig)
 %PFC_UPDATE_FLOW 「检查更新」的完整交互流程（GUIDE 界面与网页界面共用）。
 % 更新源对用户透明、没有可配置项，因此只有两种结果：有更新 / 已是最新。
 if pfc_visa('is_busy')
-    warndlg('采集进行中，请先 STOP。', 'PFC');
+    if ~isempty(fig) && isvalid(fig)
+        pfc_ui_push(fig, struct('cmd', 'status', 'text', '采集进行中，请先 STOP FUS。'));
+    end
     return;
 end
 

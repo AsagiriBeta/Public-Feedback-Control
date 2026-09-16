@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PFC · DHO814 / DG2052</title>
 <link rel="stylesheet" href="vendor/uPlot.min.css">
-<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="app.css?v=nolabels3">
 <script src="vendor/uplot.iife.min.js"></script>
-<script src="app.js"></script>
+<script src="app.js?v=nolabels3"></script>
 <script defer src="vendor/alpine.min.js"></script>
 </head>
 <!-- 参数名与 MATLAB 侧存档字段一致（pfc_gui_params），两边共用一套词汇，
@@ -16,7 +16,7 @@
 
 <div class="app">
 
-  <!-- ============ 左列 ============ -->
+  <!-- ============ 左列：共用 chrome（文件 / 超声参数），步骤按钮在右侧页签里 ============ -->
   <div class="col-left">
 
     <section class="card">
@@ -37,43 +37,42 @@
     </section>
 
     <section class="card">
-      <h2>1. CH1 回读 <span class="en">/ Readback · FFT</span></h2>
-      <div class="row">
-        <label>频率</label>
-        <input type="number" step="0.01" x-model.number="p.dbg_freq" @input="pushParams(false)" @change="pushParams(true)">
-        <span class="unit">MHz</span>
-      </div>
-      <div class="row">
-        <label>电压</label>
-        <input type="number" step="1" x-model.number="p.dbg_volt" @input="pushParams(false)" @change="pushParams(true)">
-        <span class="unit">mVpp</span>
-      </div>
-      <div class="btns">
-        <button @click="action('oneshot')" :disabled="busy">单次 One-shot</button>
-        <button @click="action('debug')" :disabled="busy">连续调试 Debug</button>
-      </div>
-    </section>
-
-    <section class="card">
       <h2>超声参数 <span class="en">(2 / 3 / 4 共用)</span></h2>
       <div class="row">
         <label>频率</label>
-        <input type="number" step="0.01" x-model.number="p.freq_mhz" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <input type="number" step="0.01" x-model.number="p.freq_mhz" @input="onDutyDrivers(false)" @change="onDutyDrivers(true)" :disabled="busy">
         <span class="unit">MHz</span>
       </div>
       <div class="row">
-        <label>电压</label>
+        <label>治疗电压</label>
         <input type="number" step="1" x-model.number="p.volt_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">mVpp</span>
       </div>
+      <!-- 功放增益：V_load ≈ volt_mVpp/1000 * amp_gain。CH1 若接在功放前，回读仍是发生器 mVpp，不能当作声压。 -->
+      <div class="row">
+        <label>功放增益</label>
+        <input type="number" step="1" min="1" x-model.number="p.amp_gain" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <span class="unit">×</span>
+      </div>
+      <div class="hint" x-text="ampLoadHint()" title="CH1 若接在功放前，回读仍是发生器 mVpp，不能当作声压"></div>
       <div class="row">
         <label>PRF</label>
-        <input type="number" step="0.1" x-model.number="p.prf_hz" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <input type="number" step="0.1" x-model.number="p.prf_hz" @input="onDutyDrivers(false)" @change="onDutyDrivers(true)" :disabled="busy">
         <span class="unit">Hz</span>
       </div>
+      <!-- 空化率 duty = T_on/PRI = n_cycle * PRF / f0_Hz；界面百分数 cav_pct = 100*duty。
+           n_cycle = (cav_pct/100) * f0_Hz / PRF。改空化率更新周期数，改周期数/频率/PRF 更新空化率。
+           周期数是 DG2052 BurstCount，必须留着。与 src/core/pfc_duty.m 同一套公式。 -->
+      <div class="row">
+        <label>空化率</label>
+        <input type="number" step="any" min="0" x-model.number="p.cav_pct" @input="onCavPct(false)" @change="onCavPct(true)" :disabled="busy">
+        <span class="unit">%</span>
+      </div>
+      <!-- 周期数 min/max 必须与 src/core/pfc_param_limits.m、web/app.js 一致。
+           软件上限 10000；超过就立刻截成 10000 并写回输入框。截断后空化率也要按真实 n_cycle 写回。 -->
       <div class="row">
         <label>周期数</label>
-        <input type="number" step="1" x-model.number="p.n_cycle" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <input type="number" step="1" min="1" max="10000" x-model.number="p.n_cycle" @input="onNCycle(false)" @change="onNCycle(true)" :disabled="busy">
         <span class="unit">cyc</span>
       </div>
       <div class="row">
@@ -81,72 +80,163 @@
         <input type="number" step="1" x-model.number="p.duration_s" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">s</span>
       </div>
+      <!-- 采样点 min/max 必须与 pfc_param_limits.m、web/app.js 一致（4096–100000）。
+           上限：100k WORD×2ch @ ~40 MSa/s ≈ 2.5 ms，USB 仍可接受；再往上（例如 400000）
+           传输变慢。超限必须立刻截断并显示截后值，不能让框里留着 400000、后端悄悄用 100000。 -->
       <div class="row">
         <label>采样点</label>
-        <input type="number" step="1024" x-model.number="p.npts" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+        <input type="number" step="1024" min="4096" max="100000" x-model.number="p.npts" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">pts</span>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>2–3. 开环 CH2</h2>
-      <div class="btns">
-        <button @click="action('noMB')" :disabled="busy">2. 无微泡</button>
-        <button @click="action('openMB')" :disabled="busy">3. 有微泡开环</button>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>4. 闭环反馈 <span class="en">/ Feedback</span></h2>
-      <div class="row">
-        <label>目标</label>
-        <input type="number" step="0.1" x-model.number="p.target_db" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
-        <span class="unit">dB</span>
-      </div>
-      <div class="row">
-        <label>闭环上限</label>
-        <input type="number" step="1" x-model.number="p.max_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
-        <span class="unit">mVpp</span>
-      </div>
-      <div class="btns">
-        <button @click="action('feedback')" :disabled="busy">4. 开始闭环 Feedback</button>
       </div>
     </section>
 
   </div>
 
-  <!-- ============ 右列 ============ -->
+  <!-- ============ 右列：步骤页签（不是按图种分页）+ 底部 STOP 始终可见 ============ -->
+  <!-- x-cloak 不要包住 STOP：Alpine 重初始化或 uihtml 闪一下时，紧急停止必须还在。 -->
   <div class="col-right">
 
-    <div class="chart-cell">
-      <div class="chart-title">时域 <span class="en">Time</span></div>
-      <div class="chart-box" id="ch-time"></div>
+    <div class="right-tabs" role="tablist" x-cloak>
+      <button type="button" role="tab" :class="{on: tab==='debug', run: runTab==='debug'}"
+              :aria-selected="tab==='debug'" @click="setTab('debug')">
+        调试 <span class="en">Debug</span>
+      </button>
+      <button type="button" role="tab" :class="{on: tab==='nomb', run: runTab==='nomb'}"
+              :aria-selected="tab==='nomb'" @click="setTab('nomb')">
+        2 无微泡
+      </button>
+      <button type="button" role="tab" :class="{on: tab==='open', run: runTab==='open'}"
+              :aria-selected="tab==='open'" @click="setTab('open')">
+        3 开环
+      </button>
+      <button type="button" role="tab" :class="{on: tab==='fb', run: runTab==='fb'}"
+              :aria-selected="tab==='fb'" @click="setTab('fb')">
+        4 闭环
+      </button>
     </div>
 
-    <div class="chart-cell">
-      <div class="chart-title">频谱 <span class="en">FFT</span></div>
-      <div class="chart-box" id="ch-fft"></div>
+    <div class="right-body" x-cloak>
+      <!-- 用 class 显隐，不用 x-show：x-show 写 inline display，会把 .step-bar 的 display:flex 冲掉，
+           busy/tab 一刷新按钮整行消失。 -->
+      <div class="step-bar is-on" :class="{'is-on': tab==='debug'}">
+        <div class="step-hint">1. 调试</div>
+        <div class="step-fields">
+          <div class="field">
+            <label>频率</label>
+            <input type="number" step="0.01" x-model.number="p.dbg_freq" @input="pushParams(false)" @change="pushParams(true)">
+            <span class="unit">MHz</span>
+          </div>
+          <div class="field">
+            <label>电压</label>
+            <input type="number" step="1" x-model.number="p.dbg_volt" @input="pushParams(false)" @change="pushParams(true)">
+            <span class="unit">mVpp</span>
+          </div>
+        </div>
+        <div class="btns step-btns">
+          <button type="button" @click="action('oneshot')" :disabled="busy">单次 One-shot</button>
+          <!-- 跑起来时就地变成 STOP，不要 disabled 到看不见；页脚 STOP FUS 始终可用。 -->
+          <button type="button"
+                  :class="{'run-stop': busy && runTab==='debug'}"
+                  :disabled="busy && runTab!=='debug'"
+                  @click="action(busy && runTab==='debug' ? 'stop' : 'debug')"
+                  x-text="busy && runTab==='debug' ? '停止调试 STOP' : '连续调试 Debug'">连续调试 Debug</button>
+        </div>
+      </div>
+
+      <div class="step-bar" :class="{'is-on': tab==='nomb'}">
+        <div class="step-hint">2. 无微泡</div>
+        <div class="btns step-btns">
+          <button type="button" @click="action('noMB')" :disabled="busy">2. 开始无微泡</button>
+        </div>
+      </div>
+
+      <div class="step-bar" :class="{'is-on': tab==='open'}">
+        <div class="step-hint">3. 有微泡开环</div>
+        <div class="btns step-btns">
+          <button type="button" @click="action('openMB')" :disabled="busy">3. 有微泡开环</button>
+        </div>
+      </div>
+
+      <div class="step-bar" :class="{'is-on': tab==='fb'}">
+        <div class="step-hint">4. 闭环</div>
+        <div class="step-fields">
+          <div class="field">
+            <label>假超声</label>
+            <input type="number" step="1" min="1" x-model.number="p.base_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+            <span class="unit">mVpp</span>
+          </div>
+          <div class="field">
+            <label>目标</label>
+            <input type="number" step="0.1" x-model.number="p.target_db" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+            <span class="unit">dB</span>
+          </div>
+          <div class="field">
+            <label>控制量</label>
+            <select x-model="p.ctrl_metric" @change="pushParams(true)" :disabled="busy">
+              <option value="2f_window_sum">2f 窗求和</option>
+              <option value="2f_peak_over_floor">2f 峰/底</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>步进</label>
+            <input type="number" step="1" min="1" x-model.number="p.vstep_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+            <span class="unit">mVpp</span>
+          </div>
+          <div class="field">
+            <label>上限</label>
+            <input type="number" step="1" x-model.number="p.max_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+            <span class="unit">mVpp</span>
+          </div>
+        </div>
+        <div class="btns step-btns">
+          <button type="button" @click="action('feedback')" :disabled="busy || !paramsReady">4. 开始闭环</button>
+        </div>
+      </div>
+
+      <!-- 图表共用一份 live 数据：切页签只改布局，不丢曲线。display:none 的格子切回时要 resizeCharts。 -->
+      <div class="chart-grid" :class="tab==='debug' ? 'mode-debug' : 'mode-exp'">
+        <div class="chart-cell cell-time-tx">
+          <div class="chart-title" x-text="titles.tx">CH1 时域 · TX</div>
+          <div class="chart-box" id="ch-time-tx"></div>
+        </div>
+        <div class="chart-cell cell-fft-tx">
+          <div class="chart-title" x-text="titles.fftTx">频谱 FFT · CH1</div>
+          <div class="chart-box" id="ch-fft-tx"></div>
+        </div>
+        <div class="chart-cell cell-time-pcd">
+          <div class="chart-title" x-text="titles.pcd">CH2 时域 · PCD</div>
+          <div class="chart-box" id="ch-time-pcd"></div>
+        </div>
+        <div class="chart-cell cell-fft-pcd">
+          <div class="chart-title" x-text="titles.fftPcd">频谱 FFT · CH2</div>
+          <div class="chart-box" id="ch-fft-pcd"></div>
+        </div>
+        <div class="chart-cell cell-trend cell-volt">
+          <div class="chart-title">电压 <span class="en">Voltage (mVpp)</span></div>
+          <div class="chart-box" id="ch-volt"></div>
+        </div>
+        <div class="chart-cell cell-trend cell-sc">
+          <div class="chart-title">稳态空化 <span class="en">SC · 10log 相对假超声</span></div>
+          <div class="chart-box" id="ch-sc"></div>
+        </div>
+        <div class="chart-cell cell-trend cell-ic">
+          <div class="chart-title">惯性空化 <span class="en">IC · 2f–2.5f/底（只监测）</span></div>
+          <div class="chart-box" id="ch-ic"></div>
+        </div>
+      </div>
     </div>
 
-    <div class="chart-cell">
-      <div class="chart-title">电压 <span class="en">Voltage (mVpp)</span></div>
-      <div class="chart-box" id="ch-volt"></div>
-    </div>
-
-    <div class="chart-cell">
-      <div class="chart-title">稳态空化 <span class="en">SC · 2f</span></div>
-      <div class="chart-box" id="ch-sc"></div>
-    </div>
-
-    <div class="chart-cell">
-      <div class="chart-title">惯性空化 <span class="en">IC · 3.3 MHz</span></div>
-      <div class="chart-box" id="ch-ic"></div>
-    </div>
-
-    <div class="status-cell">
-      <div class="status-label">脉冲 <span class="en">Pulse #</span></div>
-      <div class="status-text" x-text="status"></div>
-      <button class="danger stop" @click="action('stop')">停止超声 STOP FUS</button>
+    <div class="right-foot" :class="{'has-cd': cdOn}">
+      <div class="cd-box" x-show="cdOn" x-cloak>
+        <div class="cd-cap">超声剩余 <span class="en">wall clock</span></div>
+        <div class="cd-num" x-text="cdClock">0:00</div>
+        <div class="cd-sub" x-text="cdSub"></div>
+      </div>
+      <div class="foot-status">
+        <div class="status-label">状态 <span class="en">Status</span></div>
+        <div class="status-text" x-text="status"></div>
+      </div>
+      <button class="danger stop" type="button" @click="action('stop')">停止超声 STOP FUS</button>
     </div>
 
   </div>

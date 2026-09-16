@@ -11,9 +11,7 @@ PCD（被动空化检测）采集与闭环超声反馈控制。算法来自 Wash
 | 示波器 | **RIGOL DHO814**（DHO800 系列） | USB-VISA / USBTMC |
 | 信号源 | **RIGOL DG2052**（DG2000 系列） | USB-VISA |
 
-VISA 地址的默认值在 `rigol/rigol_instr_config.m`。实际使用时**不用手抄地址**：界面点
-**仪器设置 → 扫描仪器**，程序会枚举本机 VISA 资源、逐个发 `*IDN?` 读出型号，自动把 DHO814 /
-DG2052 填好；识别不出来时也能手动输入。命令行等价写法：
+VISA 地址**没有写死在代码里**。界面点 **仪器设置 → 扫描仪器**，程序会枚举本机 VISA 资源、逐个发 `*IDN?` 读出型号，空栏自动填 DHO814 / DG2052；已有地址不会被扫描冲掉。识别不出来时也能手动输入或点「设为」。命令行等价写法：
 
 ```matlab
 devs = rigol_scan_instruments();            % 看看都挂着什么仪器
@@ -96,7 +94,7 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 
 | 字段 | 含义 |
 |------|------|
-| `n_clip_retry` | 因削顶被丢弃并重采的帧数（>0 说明量程偏紧） |
+| `n_clip_retry` | 因削顶被丢弃并重采的帧数（未进 V/SC/闭环/图） |
 | `n_prime_discard` | 只为标定量程而未入库的帧数（正常为 1） |
 | `pcd_scale_vdiv` / `tx_scale_vdiv` | 结束时 CH1/CH2 的量程 (V/div)，解释竖直分辨率 |
 | `timebase_offset_s` | 采集时实际生效的水平偏移 |
@@ -105,9 +103,9 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 | `burst_align` | 猝发在窗内的位置：`burst_s` / `win_s` / `start_s` / `in_window` |
 | `waveform_format` | `WORD`（16 位容器 / 12 位 ADC） |
 
-> 自检里的「K=1.4 → 0 帧」是拿**已经被削顶过的**旧数据回放的 —— 那些帧的峰值本身
-> 已被低估。它只能说明「旧数据按新策略不再触发判据」，**不能**保证真机首轮不触发
-> 重采。真机首轮请看 `n_clip_retry` 是否接近 0。
+> 量程：`K_DIV=1.0`（峰值占 1 格，半边满量程 ≈ **4×峰值**）。仍贴轨则丢弃重采（最多 3 次），曲线不留削顶点。
+> 真机看 `n_clip_retry` 是否接近 0。
+
 
 ## 运行
 
@@ -118,7 +116,19 @@ cd('<项目目录>')     % 例如 D:\Projects\Public-Feedback-Control
 pfc_app             % 启动界面（会自动把 src/ rigol/ 等加进路径）
 ```
 
-界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT 并写入 `data/`（或你选的保存目录）。**PCDcontrol** / **Sonication** 每一发同样刷新时域+FFT，结束后把全部脉冲存成 `.mat`。
+界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT。**无微泡 / 有微泡开环 / 闭环** 每一发同样刷新时域+FFT。结束后（以及 oneshot / 调试）都写成**一个目录**，raw 和分析图放在一起：
+
+```
+data/OpenMB_run_YYYYMMDD_HHMMSS/
+  raw.mat           % 与旧扁平 .mat 同一套字段（顶层旧名 + params）
+  params.txt        % pfc_save_params 快照
+  fft_ch1.png       % CH1 谱，标 f0
+  fft_ch2.png       % CH2 谱，标 f0/2f 与 2.85/4.18 EMI
+  time_ch1_ch2.png  % 短时域片段
+  pulse_sc_ic.png   % 电压 / SC / IC / 2f-vs-EMI（n>1 且有这些向量时）
+```
+
+界面状态栏给出的是这个**文件夹**路径。旧的扁平 `*_run_*.mat` 仍可 `load`，不改加载逻辑。出图只在存盘结束时做一次（中途每 5 发只覆盖 `raw.mat`）；画失败也不丢 raw。
 
 DHO814 **示波器屏幕上有 Math FFT**（最多约 1 Mpts，见 [DHO800 数据手册](https://download.rigol.com/en/Manual/Digital%20Oscilloscope/DHO800/DHO800_DataSheet_EN.pdf) 与编程手册 `:MATH:FFT:*`）。闭环用的二次谐波 SC（2f）/ IC 宽带和存盘分析在 **电脑端 FFT** 完成，不依赖把示波器 MATH 波形读回来。
 
@@ -167,6 +177,8 @@ Public-Feedback-Control/
 | `src/core/pfc_run_experiment.m` / `pfc_oneshot.m` / `pfc_debug_run.m` | 闭环 / 单次 / 调试流程 |
 | `src/core/pfc_debug_no_mb.m` / `pfc_debug_live.m` | 开环调试与运行中实时改参数 |
 | `src/core/pfc_spectrum.m` / `pfc_band_energy.m` / `pfc_fft_peak_mhz.m` | 信号处理 |
+| `src/core/pfc_save_acquisition.m` / `pfc_save_run_plots.m` | 一次实验一个目录（raw.mat + 分析图） |
+| `src/core/pfc_save_params.m` | 存盘参数快照 |
 | `src/core/pfc_fitrow.m` | 采样帧定长整形（空帧/不等长帧的兜底，两种采集路径共用） |
 | `src/io/pfc_visa.m` | 仪器连接与运行锁 |
 | `src/io/pfc_prefs.m` | 界面参数持久化 |
@@ -204,12 +216,12 @@ Public-Feedback-Control/
 | 文件 | 作用 | 删除后 |
 |------|------|--------|
 | `pfc_prefs.mat` | 界面参数存档 | 回到界面默认值 |
-| `rigol_config.ini` | 仪器 VISA 地址覆盖 | 回到代码内默认地址 |
+| `rigol_config.ini` | 仪器 VISA 地址与通道覆盖 | 回到空地址（须重新扫描） |
 | `pfc_update.ini` | 更新源地址 | 关闭更新检查 |
 | `data/` | 默认采集输出目录 | 下次自动重建 |
 
-仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）；点进去先按 **扫描仪器**
-能自动识别接着的 DHO814 / DG2052。
+仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）。点进去先 **扫描仪器**，
+空栏会自动填识别到的 DHO814 / DG2052；已有地址不会被冲掉。可用 **试连接** 确认 *IDN?*。
 
 ## 界面
 

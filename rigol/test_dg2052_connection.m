@@ -22,9 +22,9 @@ if ~exist('visadev', 'file')
 end
 
 cfg = rigol_instr_config();
-if contains(cfg.awg_visa, 'YOUR_', 'IgnoreCase', true)
-    error('test_dg2052:Config', ['请在 rigol_instr_config.m 中将 awg_visa 改为本机 VISA 地址。\n' ...
-        '在命令窗口执行 visadevlist 可列出设备。']);
+if isempty(strtrim(char(string(cfg.awg_visa)))) || contains(cfg.awg_visa, 'YOUR_', 'IgnoreCase', true)
+    error('test_dg2052:Config', ['尚未配置信号源地址。请在界面「仪器设置」扫描并保存，\n' ...
+        '或 visadevlist 后把 ResourceName 写入 rigol_config.ini。']);
 end
 
 ch = cfg.awg_channel;

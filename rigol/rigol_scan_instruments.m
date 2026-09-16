@@ -123,8 +123,11 @@ try
 catch e
     err = short_err(e.message);
 end
+% clear 往往来不及释放 USB，下一台会被判「资源被占用」。delete 是同步关掉。
 try
-    clear dev          % 释放临时连接，避免占用资源
+    if ~isempty(dev)
+        delete(dev);
+    end
 catch
 end
 end

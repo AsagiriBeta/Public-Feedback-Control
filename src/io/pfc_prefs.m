@@ -47,16 +47,18 @@ end
 function S = default_S()
 % 所有可持久化字段（数值字段默认 []，文本字段默认 ''）——同时充当字段名清单
 S = struct( ...
-    'freq_mhz', [], 'volt_mVpp', [], 'prf_hz', [], 'n_cycle', [], ...
-    'duration_s', [], 'npts', [], 'target_db', [], 'max_mVpp', [], ...
-    'mb_load_s', [], 'studyID', '', 'directory', '', 'dbg_freq', [], 'dbg_volt', []);
+    'freq_mhz', [], 'volt_mVpp', [], 'amp_gain', [], 'prf_hz', [], 'n_cycle', [], ...
+    'cav_pct', [], 'duration_s', [], 'npts', [], 'target_db', [], 'max_mVpp', [], ...
+    'base_mVpp', [], 'vstep_mVpp', [], 'ctrl_metric', '', 'mb_load_s', [], 'studyID', '', 'directory', '', 'dbg_freq', [], 'dbg_volt', []);
 end
 
 function S = prefs_defaults()
 % 出厂默认值（前端首次渲染 / 存档缺失时用）
 S = struct( ...
-    'freq_mhz', 1.5, 'volt_mVpp', 50, 'prf_hz', 2, 'n_cycle', 400, ...
-    'duration_s', 120, 'npts', 40000, 'target_db', 2, 'max_mVpp', 120, ...
+    'freq_mhz', 1.5, 'volt_mVpp', 50, 'amp_gain', 40, 'prf_hz', 2, 'n_cycle', 400, ...
+    'cav_pct', 100 * 400 * 2 / (1.5e6), 'duration_s', 120, 'npts', 40000, ...
+    'target_db', 2, 'max_mVpp', 120, 'base_mVpp', 100, 'vstep_mVpp', 50, ...
+    'ctrl_metric', '2f_window_sum', ...
     'mb_load_s', 15, 'studyID', '', 'directory', '', 'dbg_freq', 1.5, 'dbg_volt', 20);
 end
 
@@ -97,6 +99,26 @@ for i = 1:numel(fn)
         S.(fn{i}) = char(v);
     end
 end
+% 旧存档可能有 400000 点 / 9990 周期；启动时截到软件上限，界面才显示采集真会用的值。
+% 默认仍是 40000 / 400，不改。
+cap = pfc_param_limits();
+if isnumeric(S.npts) && isfinite(S.npts)
+    S.npts = max(cap.npts_min, min(round(S.npts), cap.npts_max));
+end
+if isnumeric(S.n_cycle) && isfinite(S.n_cycle)
+    S.n_cycle = max(cap.n_cycle_min, min(round(S.n_cycle), cap.n_cycle_max));
+end
+% 旧存档没有空化率：用 n_cycle 反算，保证和发生器周期数一致。
+if isnumeric(S.n_cycle) && isfinite(S.n_cycle)
+    pct = pfc_duty('cav_pct', S.n_cycle, S.freq_mhz, S.prf_hz);
+    if isfinite(pct)
+        S.cav_pct = pct;
+    end
+end
+% 旧存档没有功放增益：默认 40 倍（实验室功放）。非法值不要当成「没开功放」。
+if ~(isnumeric(S.amp_gain) && isfinite(S.amp_gain) && S.amp_gain > 0)
+    S.amp_gain = 40;
+end
 end
 
 function write_merged(S)
@@ -115,6 +137,15 @@ for i = 1:numel(fn)
         continue;
     end
     v = S.(k);
+    if iscell(v) && isscalar(v)
+        v = v{1};
+    end
+    if ischar(v) || isstring(v)
+        n = str2double(strtrim(char(v)));
+        if isfinite(n) && ~strcmpi(k, 'studyID') && ~strcmpi(k, 'directory') && ~strcmpi(k, 'ctrl_metric')
+            v = n;
+        end
+    end
     if isnumeric(v)
         if isscalar(v) && isfinite(v) && v > 0
             D.(k) = double(v);

@@ -29,14 +29,50 @@ try
         % 已经采满的缓冲，看起来正常；第二帧起仪器一直停着，读到的还是同一屏，
         % 改完量程后 :WAVeform:DATA? 还可能一直等到超时 —— 界面就像卡在 #1。
         writeline(dev, ':RUN');
-        pause(0.12);
+        if ~pause_or_abort(0.12)
+            restore_timeout(dev, oldT);
+            realFs = 40e6;
+            timeIntervalNanoSeconds = 1e9 / realFs;
+            return;
+        end
         writeline(dev, ':STOP');
-        pause(0.05);
+        if ~pause_or_abort(0.05)
+            try, writeline(dev, ':RUN'); catch, end
+            restore_timeout(dev, oldT);
+            realFs = 40e6;
+            timeIntervalNanoSeconds = 1e9 / realFs;
+            return;
+        end
     else
         writeline(dev, ':SINGle');
+        % 上一发读完仪器停在 STOP。立刻查 STATus 仍是 STOP，会把旧波形再读一遍
+        % （调探头距离时表现为连续完全相同的脉冲）。先等到离开 STOP（已武装 WAIT），
+        % 再等这次触发完成回到 STOP。不改 WORD/RAW。
+        tArm = tic;
+        while toc(tArm) < min(1.0, timeout_s)
+            if scope_abort()
+                writeline(dev, ':STOP');
+                restore_timeout(dev, oldT);
+                realFs = 40e6;
+                timeIntervalNanoSeconds = 1e9 / realFs;
+                return;
+            end
+            st = rigol_visa_query(dev, ':TRIGger:STATus?');
+            if ~contains(st, 'STOP', 'IgnoreCase', true)
+                break;
+            end
+            pause(0.01);
+        end
         t0 = tic;
         ok = false;
         while toc(t0) < timeout_s
+            if scope_abort()
+                writeline(dev, ':STOP');
+                restore_timeout(dev, oldT);
+                realFs = 40e6;
+                timeIntervalNanoSeconds = 1e9 / realFs;
+                return;
+            end
             st = rigol_visa_query(dev, ':TRIGger:STATus?');
             if contains(st, 'STOP', 'IgnoreCase', true)
                 ok = true;
@@ -94,4 +130,22 @@ if ~isempty(oldT)
         catch
         end
 end
+end
+
+function tf = scope_abort()
+global pfc_abort %#ok<GVMIS>
+tf = ~isempty(pfc_abort) && logical(pfc_abort);
+end
+
+function ok = pause_or_abort(dt)
+% 短暂停也要让 STOP / 关窗进来；中止就立刻返回，别把 visadev 空等到 Timeout。
+ok = false;
+t0 = tic;
+while toc(t0) < dt
+    if scope_abort()
+        return;
+    end
+    pause(min(0.02, dt));
+end
+ok = true;
 end
