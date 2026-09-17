@@ -82,6 +82,7 @@ P.n_dummy = pickn(src, 'n_dummy');
 P.sc0 = pickn(src, 'sc0');
 P.ic0 = pickn(src, 'ic0');
 P.ctrl_metric = pickstr(src, 'ctrl_metric', '');
+P.sc_harm = pickstr(src, 'sc_harm', '2f');
 
 % —— 调试页采集框（oneshot / 连续调试用它驱动 AWG；正式实验只作当时界面留档）
 P.dbg_freq = pickn(src, 'dbg_freq', raw, 'dbg_freq');

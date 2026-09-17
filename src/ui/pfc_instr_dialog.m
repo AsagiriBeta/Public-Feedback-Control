@@ -57,18 +57,15 @@ mk_btn(row4, C, fn, '↓ 设为信号源', C.btn2, @(~, ~) assign('awg'));
 [scope_e] = mk_addr_row(g, C, fn, 5, '示波器', char(cfg.scope_visa));
 [awg_e]   = mk_addr_row(g, C, fn, 6, '信号源', char(cfg.awg_visa));
 
-row7 = uigridlayout(g, [1 6]);
+row7 = uigridlayout(g, [1 4]);
 row7.Layout.Row = 7;
 row7.BackgroundColor = C.fig;
 row7.Padding = [0 0 0 0];
-row7.ColumnWidth = {70, 70, 70, 70, 80, 70};
-row7.ColumnSpacing = 8;
-uilabel(row7, 'Text', '回读 CH', 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
-tx_sp = mk_spin(row7, C, fn, cfg.scope_tx_channel, [1 4]);
-uilabel(row7, 'Text', 'PCD CH', 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
-pcd_sp = mk_spin(row7, C, fn, cfg.scope_pcd_channel, [1 4]);
-uilabel(row7, 'Text', '信号源 CH', 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
-awg_sp = mk_spin(row7, C, fn, cfg.awg_channel, [1 2]);
+row7.ColumnWidth = {'fit', 'fit', 'fit', '1x'};
+row7.ColumnSpacing = 20;
+tx_sp  = mk_ch_pair(row7, C, fn, '回读 CH', cfg.scope_tx_channel, [1 4]);
+pcd_sp = mk_ch_pair(row7, C, fn, 'PCD CH', cfg.scope_pcd_channel, [1 4]);
+awg_sp = mk_ch_pair(row7, C, fn, '信号源 CH', cfg.awg_channel, [1 2]);
 
 row8 = uigridlayout(g, [1 3]);
 row8.Layout.Row = 8;
@@ -361,6 +358,17 @@ uilabel(rowg, 'Text', label, 'FontColor', C.text, 'FontName', fn, 'FontSize', 11
 ed = uieditfield(rowg, 'text', 'Value', val, ...
     'FontName', fn, 'FontSize', 11, ...
     'BackgroundColor', C.editBg, 'FontColor', C.editFg);
+end
+
+function sp = mk_ch_pair(parent, C, fn, label, val, lim)
+% 标签贴着数字框，避免 6 列被拉满窗口后「回读」对上别人的通道。
+g = uigridlayout(parent, [1 2]);
+g.BackgroundColor = C.fig;
+g.Padding = [0 0 0 0];
+g.ColumnWidth = {'fit', 72};
+g.ColumnSpacing = 6;
+uilabel(g, 'Text', label, 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
+sp = mk_spin(g, C, fn, val, lim);
 end
 
 function sp = mk_spin(parent, C, fn, val, lim)

@@ -143,7 +143,7 @@ try
     allow = fieldnames(pfc_prefs('defaults'));
 catch
 end
-extra = {'cav_pct', 'amp_gain', 'ctrl_metric', 'target_db'};
+extra = {'cav_pct', 'amp_gain', 'ctrl_metric', 'target_db', 'sc_harm'};
 fn = fieldnames(D);
 for i = 1:numel(fn)
     k = fn{i};
@@ -163,7 +163,7 @@ for i = 1:numel(fn)
         s = strtrim(char(v));
         n = str2double(s);
         % 数字框经 uihtml 变成字符串时（「2」「3.0」）仍按数值写入，否则闭环会退回缺省 2 dB。
-        if isfinite(n) && ~strcmpi(k, 'studyID') && ~strcmpi(k, 'directory') && ~strcmpi(k, 'ctrl_metric')
+        if isfinite(n) && ~strcmpi(k, 'studyID') && ~strcmpi(k, 'directory') && ~strcmpi(k, 'ctrl_metric') && ~strcmpi(k, 'sc_harm')
             S.(k) = n;
         else
             S.(k) = s;

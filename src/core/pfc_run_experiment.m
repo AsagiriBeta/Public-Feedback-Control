@@ -46,8 +46,12 @@ writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd))
 fprintf('PFC 第一档 %.4g mVpp  触发 %.3g mV  （闭环假超声按 base 设触发，勿用治疗电压）\n', v_first, trig * 1e3);
 % CH1 若接在功放前，回读仍是发生器 mVpp，不能当作声压。
 if isfinite(p.amp_gain) && p.amp_gain >= 40
-    vload = (v_out / 1000) * p.amp_gain;
-    fprintf('确认功放已开 ×%.4g    发生器 %.4g mVpp → 约 %.3g Vpp\n', p.amp_gain, v_out, vload);
+    v_hint = v_out;
+    if any(strcmp(mode, {'during', 'feedback'}))
+        v_hint = p.max_mVpp;
+    end
+    vload = (v_hint / 1000) * p.amp_gain;
+    fprintf('确认功放已开 ×%.4g    %.4g mVpp → 约 %.3g Vpp\n', p.amp_gain, v_hint, vload);
 end
 
 ui.clearTrend();
@@ -189,19 +193,20 @@ result = save_now();
         if ~isempty(t_us)
             S.t_elapsed_s = toc(t_us);
         end
-        S.RampSC = SCrec;          % 2f±20 kHz |FFT| 求和（Fig.6 蓝线；Chien 同款，频点 3 MHz）
+        S.RampSC = SCrec;          % 所选谐波 ±20 kHz |FFT| 求和（Fig.6 蓝线）
         S.RampIC = ICrec;          % 宽带 IC / 参考底（监测）
-        S.Peak2f = PKraw;          % 2f 窗内 |Y| 峰
-        S.SCctrl = PKrec;          % 2f 峰/底（旧默认控制量；现为可选项）
+        S.Peak2f = PKraw;          % SC 窗内 |Y| 峰
+        S.SCctrl = PKrec;          % 窗内峰/底
         S.floorY = Flrec;
         S.ctrl_metric = metric;
+        S.sc_harm = p.sc_harm;
         S.peaks_ch1_mhz_db = peaks_ch1;
         S.harm_db = harm_db;
         S.harm_db_cols = 'f0_dB  2f_dB  3f_dB  1.5f_dB  2.5f_dB  0.5f_dB';
         S.harm_halfwidth_mhz = 0.05;    % 2f 记录窗；旧数据是 0.20，会吞进 2.85 EMI
-        cav = pfc_cav_bands(p.freq_mhz * 1e6);
-        S.sc_band_mhz = cav.sc_mhz;   % 1.5 MHz → 3.0；Fig.6 蓝线 = 该窗 ±20 kHz 求和
-        S.ic_band_mhz = cav.ic_bb_mhz; % 2f～2.5f 宽带监测
+        cav = pfc_cav_bands(p.freq_mhz * 1e6, p.sc_harm);
+        S.sc_band_mhz = cav.sc_mhz;
+        S.ic_band_mhz = cav.ic_bb_mhz;
         S.floor_band_mhz = cav.floor_mhz;
         S.freq_MHz = p.freq_mhz;
         S.volt_mVpp = v_out;
@@ -273,6 +278,7 @@ result = save_now();
         src.sc0 = sc0;
         src.ic0 = ic0;
         src.ctrl_metric = metric;
+        src.sc_harm = p.sc_harm;
         src.studyID = p.studyID;
         src.pcd_scale_vdiv = scPcd;
         src.tx_scale_vdiv = scTx;
@@ -298,6 +304,9 @@ result = save_now();
         n0 = n_good;
         prime = true;      % 第一发：只用来标定量程与校验采集窗（避免初值过宽浪费量化）
         clip_retry = 0;    % 连续削顶重采计数（上限 3，避免一直空转）
+        wait_note = '';    % 触发失败时别被「有效 0 帧」盖掉
+        acq_mode = 'single';
+        n_miss = 0;
         while pfc_visa('alive', token)
             if us_expired()
                 break;
@@ -312,9 +321,12 @@ result = save_now();
             cd_push();
             % 只在还没有任何有效帧时用倒计时占状态栏。有帧之后改由本发诊断
             % （CH1 是否驱动、2f 真/EMI/底噪）占着，采集等待期间也能看见。
+            % 触发失败时保留原因，不要每圈改回「有效 0 帧」，否则像页面死了。
             if n_good == n0
                 left = remain_us();
-                if isfinite(tgt)
+                if ~isempty(wait_note)
+                    ui.status(sprintf('%s  %s  墙钟剩余 %.0f s', label, wait_note, left));
+                elseif isfinite(tgt)
                     ui.status(sprintf('%s  %d / %d  墙钟剩余 %.0f s', ...
                         label, n_good - n0, tgt, left));
                 else
@@ -323,15 +335,34 @@ result = save_now();
                 end
             end
             [chPcd, ~, realFs, chTx] = rigol_dho814_acquire_block( ...
-                scope, p.npts, cfg.scope_pcd_channel, 'single', timeout_s);
+                scope, p.npts, cfg.scope_pcd_channel, acq_mode, timeout_s, ...
+                p.period_s + 0.08);
             if ~pfc_visa('alive', token)
                 break;
             end
             if ~frame_ok(chPcd, chTx)
-                ui.status(sprintf(['%s  等待 CH1 触发超时（电平 %.0f mV）。' ...
-                    '假超声幅度须明显高于触发，可 STOP 后重开。'], label, trig * 1e3));
+                n_miss = n_miss + 1;
+                show_live(chTx, chPcd, realFs, do_fb);
+                if n_miss == 1
+                    trig = 1e-4;  % 0.1 mV：发生器 200 mVpp 时 CH1 常常只有零点几 mV
+                    try
+                        writeline(scope, sprintf(':TRIGger:EDGE:LEVel %.8g', trig));
+                    catch
+                    end
+                    wait_note = sprintf('CH1 未触发，电平已降到 %.2f mV', trig * 1e3);
+                else
+                    acq_mode = 'live';
+                    try
+                        writeline(scope, ':TRIGger:SWEep AUTO');
+                    catch
+                    end
+                    wait_note = 'CH1 仍弱，已改定时采屏（不再空等边沿）';
+                end
+                ui.status(sprintf('%s  %s  墙钟剩余 %.0f s', label, wait_note, remain_us()));
                 continue;
             end
+            n_miss = 0;
+            wait_note = '';
             if isfinite(realFs) && realFs > 0
                 info.realFs = realFs;
             end
@@ -343,6 +374,9 @@ result = save_now();
                 n_prime = n_prime + 1;
                 [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
                 align = check_burst_window(chTx, info.realFs, p);
+                show_live(chTx, chPcd, info.realFs, do_fb);
+                ui.status(sprintf('%s  第 1 屏只定量程，下一发入库  墙钟剩余 %.0f s', ...
+                    label, remain_us()));
                 continue;
             end
             % 削顶会造假谐波（对称贴轨 → 假 3f/5f，2f 被压），入库会把闭环和图带歪。
@@ -353,6 +387,7 @@ result = save_now();
                 [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
                 if clip_retry < 3
                     clip_retry = clip_retry + 1;
+                    show_live(chTx, chPcd, info.realFs, do_fb);
                     ui.status(sprintf('%s  削顶已丢弃，扩量程重采（第 %d/3 次）', ...
                         label, clip_retry));
                     continue;
@@ -364,6 +399,13 @@ result = save_now();
             clip_retry = 0;
             rowP = pfc_fitrow(chPcd, acq_n);
             rowT = pfc_fitrow(chTx, acq_n);
+            % 整形后再判一次：截断/补零后仍贴轨的同样不能进 SC。
+            if rigol_dho814_clipped(rowT, scTx) || rigol_dho814_clipped(rowP, scPcd)
+                n_clip = n_clip + 1;
+                [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
+                ui.status(sprintf('%s  削顶（整形后）已丢弃，不写入 SC', label));
+                continue;
+            end
             % :SINGle 竞态：上一发停在 STOP 时立刻读会把同一屏再记一次。
             % 调距离时看起来像「走了一步」，其实几何没变。
             if n_good >= 1 && isequal(rowT, txmat(n_good, :)) && isequal(rowP, datamat(n_good, :))
@@ -375,11 +417,11 @@ result = save_now();
             k = n_good;
             datamat(k, :) = rowP; %#ok<AGROW>
             txmat(k, :) = rowT; %#ok<AGROW>
-            % 两路时域+频谱都上屏：CH1 正弦截 16 周期，CH2 宽带整段。SC/IC 仍只由 CH2 谱计算。
+            % 闭环也每发刷新时域+FFT。以前每 5 发且 CH1 不算谱，界面会冻在假超声最后一屏。
             ui.waveform(txmat(k, :), info.realFs, p.freq_mhz, 'CH1 回读 TX', struct('ch', 'tx', 'fft', true));
             ui.waveform(datamat(k, :), info.realFs, p.freq_mhz, 'CH2 PCD', struct('ch', 'pcd', 'fft', true));
             [F, Y, db] = pfc_spectrum(datamat(k, :), info.realFs);
-            [sc, ic, ~, ~, M] = pfc_band_energy(Y, F, p.freq_mhz * 1e6, cfg.harmonic_bandwidth_hz);
+            [sc, ic, ~, ~, M] = pfc_band_energy(Y, F, p.freq_mhz * 1e6, cfg.harmonic_bandwidth_hz, p.sc_harm);
             pk = M.sc_ctrl;
             ic_ctrl = M.ic_ctrl;
             % 调压盯 ctrl：窗求和才能让 Fig.6 蓝线进黄带；峰/底更能到 4 dB 但蓝线对不上。
@@ -406,18 +448,28 @@ result = save_now();
             PKrec(k) = pk; %#ok<AGROW>
             PKraw(k) = M.sc_peak; %#ok<AGROW>
             Flrec(k) = M.floor; %#ok<AGROW>
-            [F1, ~, db1] = pfc_spectrum(txmat(k, :), info.realFs);
-            [ch1pk, ch1db] = pfc_fft_peak_mhz(F1, db1, 0.3, 8);
+            pp1 = (max(txmat(k, :)) - min(txmat(k, :))) * 1e3;
+            pp2 = (max(datamat(k, :)) - min(datamat(k, :))) * 1e3;
+            % 闭环不每发再 FFT CH1：峰位只用于状态栏，用时域峰峰值判断有没有驱动。
+            if ~do_fb || mod(k, 10) == 1
+                [F1, ~, db1] = pfc_spectrum(txmat(k, :), info.realFs);
+                [ch1pk, ch1db] = pfc_fft_peak_mhz(F1, db1, 0.3, 8);
+            else
+                ch1pk = NaN;
+                ch1db = NaN;
+            end
             peaks_ch1(k, :) = [ch1pk, ch1db]; %#ok<AGROW>
-            % 按本帧峰值给下一帧定量程（4× 余量，减少下一发贴轨）
             [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
             push_trend(k, ctrl, sc, ic_ctrl, volt);
             q2 = pfc_2f_quality(F, db, p.freq_mhz);
-            pp1 = (max(txmat(k, :)) - min(txmat(k, :))) * 1e3;
-            pp2 = (max(datamat(k, :)) - min(datamat(k, :))) * 1e3;
-            ok1 = isfinite(ch1pk) && abs(ch1pk - p.freq_mhz) < 0.25 && pp1 >= 0.2 * volt;
+            ok1 = (isfinite(ch1pk) && abs(ch1pk - p.freq_mhz) < 0.25 && pp1 >= 0.2 * volt) ...
+                || (do_fb && ~isfinite(ch1pk) && pp1 >= 0.2 * volt);
             if ok1
-                txmsg = sprintf('CH1 %.1f mVpp @ %.3f MHz OK', pp1, ch1pk);
+                if isfinite(ch1pk)
+                    txmsg = sprintf('CH1 %.1f mVpp @ %.3f MHz OK', pp1, ch1pk);
+                else
+                    txmsg = sprintf('CH1 %.1f mVpp', pp1);
+                end
             else
                 txmsg = sprintf('CH1 %.2f mVpp @ %s 【回读过弱/不是 %.2f MHz，先查 CH1 接线】', ...
                     pp1, num2str(ch1pk, '%.3f'), p.freq_mhz);
@@ -437,71 +489,80 @@ result = save_now();
                     label, k, left, txmsg, cav, pp2);
             end
             ui.status(live);
-            fprintf('%s  2f_dB=%.1f  f/2=%.1f dB\n', live, harm_db(k, 2), harm_db(k, 6));
-            if mod(k, 5) == 0
+            if ~do_fb
+                fprintf('%s  2f_dB=%.1f  f/2=%.1f dB\n', live, harm_db(k, 2), harm_db(k, 6));
+            end
+            sav_n = 5;
+            if do_fb
+                sav_n = 15;
+            end
+            if mod(k, sav_n) == 0
                 save_now(false);
             end
             if do_fb
-                vstep = 50;
-                if isfield(p, 'vstep_mVpp') && isfinite(p.vstep_mVpp) && p.vstep_mVpp > 0
-                    vstep = p.vstep_mVpp;
-                end
-                % 图仍画本发原值（push_trend / Fig.6 蓝线 = ctrl）。电压只用近 3 发中位数。
+                % 图仍画本发原值。电压用近 5 发平均。
+                % 爬升：离黄带远约 +35 mV；本发已接近目标则按单发收步（1–6 mV）。
                 ctrl_f = ctrl;
-                i1 = max(n0 + 1, k - 2);
+                i1 = max(n0 + 1, k - 4);
                 if use_sum
                     hist = SCrec(i1:k);
                 else
                     hist = PKrec(i1:k);
                 end
-                med = median(hist(:), 'omitnan');
-                if isfinite(med) && med > 0
-                    ctrl_f = med;
+                avg = mean(hist(:), 'omitnan');
+                if isfinite(avg) && avg > 0
+                    ctrl_f = avg;
+                end
+                err_db = NaN;
+                err_raw = NaN;
+                if isfinite(sc_tgt) && sc_tgt > 0 && isfinite(ctrl_f) && ctrl_f > 0
+                    err_db = 10 * log10(ctrl_f / sc_tgt);
+                end
+                if isfinite(sc_tgt) && sc_tgt > 0 && isfinite(ctrl) && ctrl > 0
+                    err_raw = 10 * log10(ctrl / sc_tgt);
                 end
                 if ramping
-                    % 单发噪声摸到中心不切维持：否则 50 mVpp 爬升冻在 ~950，蓝线长期贴黄带下沿。
-                    % 连续 2 发原值过中心且中位数已近黄带，或中位数本身已到中心，才切维持。
-                    if isfinite(sc_tgt) && isfinite(ctrl) && ctrl >= sc_tgt
-                        n_tgt_hit = n_tgt_hit + 1;
-                    else
-                        n_tgt_hit = 0;
+                    % 快到目标：用本发与平均里更接近目标的那个算步距（平均滞后会让
+                    % 单发已到 2 dB 仍 +25 mV）。本发一旦进入黄带就停大步。
+                    err_up = err_db;
+                    if isfinite(err_raw)
+                        if ~(isfinite(err_up))
+                            err_up = err_raw;
+                        else
+                            err_up = max(err_db, err_raw);  % 负得少 = 更接近目标
+                        end
                     end
-                    near_lo = isfinite(sc_lo) && isfinite(ctrl_f) && ctrl_f >= sc_lo;
-                    med_at_tgt = isfinite(sc_tgt) && isfinite(ctrl_f) && ctrl_f >= sc_tgt;
-                    if k > n0 + 1 && (med_at_tgt || (n_tgt_hit >= 2 && near_lo))
+                    raw_in = isfinite(sc_lo) && isfinite(ctrl) && ctrl >= sc_lo;
+                    mean_in = isfinite(sc_lo) && isfinite(ctrl_f) && ctrl_f >= sc_lo;
+                    if k > n0 + 1 && (raw_in || mean_in)
                         ramping = false;
                         n_high = 0;
                         n_low = 0;
                     else
-                        volt = min(max_mVpp, volt + vstep);
+                        volt = min(max_mVpp, volt + adapt_vstep_mV(err_up, true, true));
                     end
                 end
                 if ~ramping
-                    % 维持禁止 vstep（常 50 mVpp）。不加 25 mV/dB：单发尖峰仍由中位数挡住。
-                    % 偏低多加、偏高少砍（非对称）：上次 ±0.30 死区 + 两侧都要 3 发确认，
-                    % 中位数在 1.7–2.0 就停手，电压从 950 只爬到 1250，蓝线长时间压在黄带下。
-                    if isfinite(sc_tgt) && sc_tgt > 0 && isfinite(ctrl_f) && ctrl_f > 0
-                        err_db = 10 * log10(ctrl_f / sc_tgt);  % >0 高于中心
-                        dead_hi = 0.30;  % 明显高于中心才砍
-                        dead_lo = 0.12;  % 略低于中心就准备加，避免坐在黄带下沿
+                    % 维持：偏高（5 dB 平台）要比较快往下砍；偏低只小步加，禁止再开 40 mV 爬升
+                    % （210004 在 130 s 掉到 1 dB 后又 +40 mV 打回 4.5）。
+                    if isfinite(err_db)
+                        dead_hi = 0.20;
+                        dead_lo = 0.18;
                         if err_db > dead_hi
                             n_high = n_high + 1;
                             n_low = 0;
-                            if n_high >= 3
-                                mag = max(3, min(8 * err_db, 12));
-                                volt = volt - mag;
+                            need_hi = 2;
+                            if err_db > 0.80
+                                need_hi = 1;
+                            end
+                            if n_high >= need_hi
+                                volt = volt - adapt_vstep_mV(err_db, false, false);
                             end
                         elseif err_db < -dead_lo
                             n_low = n_low + 1;
                             n_high = 0;
-                            % 已低于黄带下沿（−0.4 dB）则 1 发就加；否则 2 发（高于砍压的 3 发）。
-                            need_lo = 2;
-                            if err_db < -0.40
-                                need_lo = 1;
-                            end
-                            if n_low >= need_lo
-                                mag = max(5, min(16 * abs(err_db), 20));
-                                volt = volt + mag;
+                            if n_low >= 2
+                                volt = volt + adapt_vstep_mV(err_db, true, false);
                             end
                         else
                             n_high = 0;
@@ -572,6 +633,25 @@ result = save_now();
         end
         ui.countdown(NaN, NaN);
     end
+
+    function show_live(yTx, yPcd, fs, skip_tx_fft)
+        % 未入库的屏也上图，避免触发/削顶时空转、网页一直停在上一实验。
+        if ~(isfinite(fs) && fs > 0)
+            fs = 40e6;
+        end
+        if nargin < 4
+            skip_tx_fft = false;
+        end
+        fft_on = ~skip_tx_fft;
+        if ~isempty(yTx)
+            ui.waveform(yTx, fs, p.freq_mhz, 'CH1 回读 TX', ...
+                struct('ch', 'tx', 'fft', fft_on));
+        end
+        if ~isempty(yPcd)
+            ui.waveform(yPcd, fs, p.freq_mhz, 'CH2 PCD', ...
+                struct('ch', 'pcd', 'fft', true));
+        end
+    end
 end
 
 function t0 = start_burst(fgen, p, volt)
@@ -605,8 +685,13 @@ end
 if rigol_dho814_clipped(chPcd, scPcd0)
     scPcd = min(1.0, 1.5 * scPcd);
 end
-writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
-writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+% 量程几乎没变就不要每发写两次 :CHANnel:SCALe（USB 往返比 FFT 还慢）。
+if abs(scTx - scTx0) / max(scTx0, 1e-6) > 0.08
+    writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
+end
+if abs(scPcd - scPcd0) / max(scPcd0, 1e-6) > 0.08
+    writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+end
 end
 
 function sc = next_scale(sc, pk, floor_vdiv, K)
@@ -681,6 +766,53 @@ end
 end
 
 function t = trig_from_mVpp(mV)
+% CH1 经常远小于发生器 Vpp（弱耦合/功放监视衰减）。旧下限 2 mV、按 12% Vpp
+% 在假超声 200 mVpp 时变成 24 mV，:SINGle 永远等不到，界面停在 0/25。
 vpp_v = max(mV, 1) / 1000;
-t = max(0.002, min(0.12 * vpp_v, 0.30 * (vpp_v / 2)));
+t = max(1e-4, min(0.02 * vpp_v, 5e-4));  % 0.1–0.5 mV
+end
+
+function mag = adapt_vstep_mV(err_db, want_up, is_ramp)
+% 爬升：开始远（≥2.5 dB）+35 mV；差 <1 dB 收到 2–4 mV。步距按本发/平均里更近目标的那个。
+if nargin < 3
+    is_ramp = true;
+end
+if ~(isfinite(err_db))
+    mag = 35;
+    return
+end
+a = abs(err_db);
+if is_ramp && want_up
+    if a >= 2.5
+        mag = 35;
+    elseif a >= 1.5
+        mag = 15;
+    elseif a >= 0.8
+        mag = 6;
+    elseif a >= 0.4
+        mag = 3;
+    else
+        mag = 1;
+    end
+    return
+end
+if ~want_up
+    if a >= 2
+        mag = 25;
+    elseif a >= 1
+        mag = 12;
+    elseif a >= 0.4
+        mag = 6;
+    else
+        mag = 2;
+    end
+    return
+end
+if a >= 1
+    mag = 8;
+elseif a >= 0.4
+    mag = 4;
+else
+    mag = 2;
+end
 end

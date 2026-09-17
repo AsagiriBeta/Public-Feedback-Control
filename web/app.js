@@ -135,6 +135,48 @@
     return hi;
   }
 
+  function scYlim(sc, tgt) {
+    if (!(typeof tgt === 'number' && isFinite(tgt))) { tgt = 2; }
+    var mx = tgt, mn = 0, i, v;
+    if (sc && sc.length) {
+      for (i = 0; i < sc.length; i++) {
+        v = sc[i];
+        if (typeof v === 'number' && isFinite(v)) {
+          if (v > mx) { mx = v; }
+          if (v < mn) { mn = v; }
+        }
+      }
+    }
+    return {
+      min: Math.min(-1, mn - 0.3),
+      max: Math.max(tgt + 1.2, mx + 0.5, 4)
+    };
+  }
+
+  function drawScBand(u) {
+    var tgt = u.__tgt_db;
+    if (!(typeof tgt === 'number' && isFinite(tgt))) { return; }
+    var bb = u.bbox;
+    var y0 = u.valToPos(tgt - 0.4, 'y', true);
+    var y1 = u.valToPos(tgt + 0.4, 'y', true);
+    var ym = u.valToPos(tgt, 'y', true);
+    var ctx = u.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(bb.left, bb.top, bb.width, bb.height);
+    ctx.clip();
+    var top = Math.min(y0, y1), h = Math.abs(y1 - y0);
+    ctx.fillStyle = 'rgba(255, 196, 80, 0.28)';
+    ctx.fillRect(bb.left, top, bb.width, h);
+    ctx.strokeStyle = 'rgba(200, 120, 40, 0.85)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(bb.left, ym);
+    ctx.lineTo(bb.left + bb.width, ym);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   var CHART_IDS = {
     timeTx: '#ch-time-tx', timePcd: '#ch-time-pcd',
     fftTx: '#ch-fft-tx', fftPcd: '#ch-fft-pcd',
@@ -197,8 +239,8 @@
       dbg_freq: 1.5, dbg_volt: 20,
       freq_mhz: 1.5, volt_mVpp: 50, amp_gain: 40, prf_hz: 2, n_cycle: 400,
       cav_pct: 100 * 400 * 2 / 1.5e6, duration_s: 120, npts: 40000,
-      target_db: 2, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 50,
-      ctrl_metric: '2f_window_sum'
+      target_db: 2, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 5,
+      ctrl_metric: '2f_window_sum', sc_harm: '2f'
     };
     // MATLAB 若在 Alpine 启动前已写入 Data，第一帧就用存档，避免框里先闪出厂 2 dB。
     if (lastData && lastData.params && typeof lastData.params === 'object') {
@@ -250,7 +292,8 @@
         this.charts.volt  = mkChart(this.$el.querySelector('#ch-volt'),
           { axes: [axisX('Pulse #'), axisY('mVpp')], series: [{}, dotSeries()] });
         this.charts.sc    = mkChart(this.$el.querySelector('#ch-sc'),
-          { axes: [axisX('Pulse #'), axisY('dB')], series: [{}, dotSeries()] });
+          { axes: [axisX('Pulse #'), axisY('dB')], series: [{}, dotSeries()],
+            hooks: { draw: [function (u) { drawScBand(u); }] } });
         this.charts.ic    = mkChart(this.$el.querySelector('#ch-ic'),
           { axes: [axisX('Pulse #'), axisY('IC')], series: [{}, dotSeries()] });
 
@@ -421,13 +464,24 @@
         this.syncCavFromNcycle();
         toMatlab('params', { params: this.p, live: !!live });
       },
-      /* V_load ≈ volt_mVpp/1000 * amp_gain。CH1 若接在功放前，回读仍是发生器 mVpp，不能当作声压。 */
+      /* V_load ≈ mVpp/1000 * amp_gain。闭环页按上限估，开环按治疗电压。 */
       ampLoadHint: function () {
-        var v = Number(this.p.volt_mVpp), g = Number(this.p.amp_gain);
+        var v = Number(this.tab === 'fb' ? this.p.max_mVpp : this.p.volt_mVpp), g = Number(this.p.amp_gain);
         if (!isFinite(v) || !isFinite(g) || g <= 0) { return ''; }
         var vpp = v / 1000 * g;
         var t = Math.abs(vpp) >= 1 ? vpp.toFixed(1) : vpp.toFixed(2);
-        return '发生器 ' + v + ' mVpp ×' + g + ' → ' + t + ' Vpp';
+        var who = this.tab === 'fb' ? '上限 ' : '发生器 ';
+        return who + v + ' mVpp ×' + g + ' → ' + t + ' Vpp';
+      },
+      scHarmHint: function () {
+        var f = Number(this.p.freq_mhz), h = String(this.p.sc_harm || '2f');
+        var n = 2;
+        if (h === '3f') { n = 3; }
+        else if (h === '1.5f') { n = 1.5; }
+        else if (h === '1f') { n = 1; }
+        else if (h === '0.5f') { n = 0.5; }
+        if (!isFinite(f) || f <= 0) { return ''; }
+        return (f * n).toFixed(2) + ' MHz';
       },
 
       /* ---- 接收 MATLAB ---- */
@@ -443,6 +497,7 @@
             if (d.params) { Object.assign(this.p, d.params); }
             this.paramsReady = true;
             if (!this.p.ctrl_metric) { this.p.ctrl_metric = '2f_window_sum'; }
+            if (!this.p.sc_harm) { this.p.sc_harm = '2f'; }
             if (!(typeof this.p.cav_pct === 'number' && isFinite(this.p.cav_pct))) {
               this.syncCavFromNcycle();
             }
@@ -539,7 +594,11 @@
         var tr = this.trend;
         var win = this._trendWin || { xmax: 40, ymax: 200 };
         this._draw(this.charts.volt, tr.x, tr.volt, 0, voltYmax(tr.volt, win.ymax));
-        this._draw(this.charts.sc, tr.x, tr.sc);
+        var tgt = this.p && this.p.target_db;
+        var scU = this.charts.sc;
+        if (scU) { scU.__tgt_db = tgt; }
+        var yr = scYlim(tr.sc, tgt);
+        this._draw(scU, tr.x, tr.sc, yr.min, yr.max);
         this._draw(this.charts.ic, tr.x, tr.ic);
       },
 

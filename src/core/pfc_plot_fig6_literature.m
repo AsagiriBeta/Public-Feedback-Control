@@ -17,9 +17,8 @@ if ~isfile(rawfile)
     error('pfc_plot_fig6_literature:raw', '没有 raw.mat：%s', rawfile);
 end
 S = load(rawfile);
-[volt, sc, ic, n_dummy, tgt_db, f0, metric] = lit_series(S, rundir);
-f2 = 2 * f0;
-write_fig(fullfile(rundir, 'fig6_literature.png'), volt, sc, ic, n_dummy, tgt_db, f2, metric, S);
+[volt, sc, ic, n_dummy, tgt_db, f0, metric, harm_tag, sc_mhz] = lit_series(S, rundir);
+write_fig(fullfile(rundir, 'fig6_literature.png'), volt, sc, ic, n_dummy, tgt_db, sc_mhz, metric, S, harm_tag);
 copyfile(fullfile(rundir, 'fig6_literature.png'), fullfile(rundir, 'fig6_control.png'));
 old3f = fullfile(rundir, 'fig6_literature_3f.png');
 if isfile(old3f)
@@ -27,7 +26,7 @@ if isfile(old3f)
 end
 end
 
-function [volt, sc, ic, n_dummy, tgt_db, f0, metric] = lit_series(S, rundir)
+function [volt, sc, ic, n_dummy, tgt_db, f0, metric, harm_tag, sc_mhz] = lit_series(S, rundir)
 volt = vec_of(S, 'Vrealtime');
 pcd = as_rows(first_of(S, {'datamat', 'chA', 'chPcd'}));
 fs = num_of(S, {'realFs'});
@@ -43,14 +42,20 @@ if ~(isfinite(f0) && f0 > 0)
 end
 f0_hz = f0 * 1e6;
 bw = 20e3;
+[~, harm_tag] = pfc_sc_harm(S);
+sc_mhz = num_of(S, {'sc_band_mhz'});
+if ~(isfinite(sc_mhz) && sc_mhz > 0)
+    Btmp = pfc_cav_bands(f0_hz, harm_tag);
+    sc_mhz = Btmp.sc_mhz;
+end
 np = size(pcd, 1);
 sc = nan(np, 1);
 ic = nan(np, 1);
 if np >= 1 && isfinite(fs) && fs > 0
     for i = 1:np
         [F, Y] = pfc_spectrum(pcd(i, :), fs);
-        [sc(i), ~, ~, ~, M] = pfc_band_energy(Y, F, f0_hz, bw);
-        ic(i) = M.ic_ctrl;       % 2f～2.5f 均值 / 参考底
+        [sc(i), ~, ~, ~, M] = pfc_band_energy(Y, F, f0_hz, bw, harm_tag);
+        ic(i) = M.ic_ctrl;
     end
 else
     sc = vec_of(S, 'RampSC');
@@ -68,12 +73,15 @@ n_dummy = max(0, min(n_dummy, max([numel(volt), numel(sc), 1])));
 metric = pfc_ctrl_metric(S, 'recorded');
 end
 
-function write_fig(fpath, volt, sc, ic, n_dummy, tgt_db, f2_mhz, metric, S)
+function write_fig(fpath, volt, sc, ic, n_dummy, tgt_db, sc_mhz, metric, S, harm_tag)
 if nargin < 8 || isempty(metric)
     metric = '2f_peak_over_floor';
 end
 if nargin < 9 || ~isstruct(S)
     S = struct();
+end
+if nargin < 10 || isempty(harm_tag)
+    harm_tag = '2f';
 end
 np = max([numel(volt), numel(sc), numel(ic), 1]);
 sc0 = dummy_mean(sc, n_dummy);
@@ -82,8 +90,8 @@ sc_db = db_re(sc, sc0);
 ic_db = db_re(ic, ic0);
 [xx, tmode, xlab] = pfc_pulse_time_s(S, np);
 xx = xx(:);
-if ~(isfinite(f2_mhz) && f2_mhz > 0)
-    f2_mhz = 3.0;
+if ~(isfinite(sc_mhz) && sc_mhz > 0)
+    sc_mhz = 3.0;
 end
 loop_sum = strcmp(metric, '2f_window_sum');
 [xL, xR] = time_xlim(xx, np, tmode);
@@ -98,9 +106,9 @@ else
     loop_txt = 'loop=peak/floor (blue SUM not controlled)';
 end
 tl = tiledlayout(fig, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-title(tl, sprintf(['Fig. 6  lab 2f=%.2f MHz (not 4.5)  dummy=%d  ', ...
+title(tl, sprintf(['Fig. 6  SC %s = %.2f MHz  dummy=%d  ', ...
     'yellow = this run target %.1f \\pm 0.4 dB  %s'], ...
-    f2_mhz, n_dummy, tgt_db, loop_txt), 'FontSize', 11, 'FontWeight', 'bold');
+    harm_tag, sc_mhz, n_dummy, tgt_db, loop_txt), 'FontSize', 11, 'FontWeight', 'bold');
 
 ax1 = nexttile(tl);
 hold(ax1, 'on');
@@ -137,7 +145,7 @@ if ~isfinite(ylo), ylo = -2; end
 if ~isfinite(yhi), yhi = tgt_db + 2; end
 ylim(ax2, [ylo - 0.2, yhi + 0.3]);
 shade_dummy_x(ax2, xx, n_dummy, tmode);
-title(ax2, sprintf('Blue: %.2f MHz (2f) \\pm20 kHz sum |FFT|   (not 4.5 MHz)', f2_mhz));
+title(ax2, sprintf('Blue: %.2f MHz (%s) \\pm20 kHz sum |FFT|', sc_mhz, harm_tag));
 if loop_sum
     sum_leg = sprintf('window sum = loop  SC_0=%.4g', sc0);
 else
@@ -170,9 +178,9 @@ if isempty(khold)
     khold = n_dummy + 1;
 end
 ih = max(1, khold):min(np, numel(sc_db));
-fprintf(['Fig.6  2f=%.2f MHz (not 4.5)  yellow=%.1f+/-0.4 dB  x=%s\n', ...
-    '  2f-sum 10log late med=%.2f mean=%.2f max=%.2f dB\n'], ...
-    f2_mhz, tgt_db, tmode, ...
+fprintf(['Fig.6  %s=%.2f MHz  yellow=%.1f+/-0.4 dB  x=%s\n', ...
+    '  sum 10log late med=%.2f mean=%.2f max=%.2f dB\n'], ...
+    harm_tag, sc_mhz, tgt_db, tmode, ...
     median(sc_db(ih), 'omitnan'), mean(sc_db(ih), 'omitnan'), max(sc_db(ih)));
 
 exportgraphics(fig, fpath, 'Resolution', 180);

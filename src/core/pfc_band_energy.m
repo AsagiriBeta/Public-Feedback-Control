@@ -1,15 +1,12 @@
-function [sc, ic, harm, sc_peak, M] = pfc_band_energy(Y, F, f0_hz, bw_hz)
+function [sc, ic, harm, sc_peak, M] = pfc_band_energy(Y, F, f0_hz, bw_hz, sc_harm)
 %PFC_BAND_ENERGY  由单边幅度谱 Y=|FFT| 算 SC / IC。
 %
-% 文献 MatlabScript_FeedbackControl.m：
-%   Y = abs(fft(...));  RampSC = sum(Y(SC_range));  % 幅度求和，不是 |X|^2
-% 窗他们写死 FFT 下标；我们改成 Hz。sum(Y) 仍作 RampSC：这就是 Fig.6 蓝线 / Chien 控制量
-% （本实验室 2f=3.0 MHz ±20 kHz，不是 4.5）。
-% sc_ctrl = 2f 峰 / 参考底，界面可选。默认闭环盯 sc_sum。
-%   ic     = 2f～2.5f 之间宽带 |Y| 均值（监测）
-%   ic_ctrl= 该宽带均值 / 同一参考底
-% 目标：假超声基线 × 10^(TGT/10)，带宽 ±0.4 dB。不改 WORD/RAW。
-B = pfc_cav_bands(f0_hz);
+% SC 窗中心 = sc_harm × f0（缺省 2f）。换 PCD 只改 sc_harm。
+% RampSC = sum(Y) 在该窗 ±20 kHz。不改 WORD/RAW。
+if nargin < 5
+    sc_harm = '2f';
+end
+B = pfc_cav_bands(f0_hz, sc_harm);
 if nargin < 4 || isempty(bw_hz)
     bw_hz = B.bw_hz;
 end
@@ -58,6 +55,8 @@ M.ic_bb = ic_bb;
 M.ic_ctrl = ic_bb / floorY;
 M.ic_bb_mhz = [ic_lo, ic_hi] / 1e6;
 M.floor_mhz = [flo, fhi] / 1e6;
+M.sc_harm = B.sc_harm;
+M.sc_mhz = B.sc_mhz;
 
 if nargout >= 3
     harm.f0   = band_max(Y, F, 1.0 * f0_hz, max(bw_hz, 50e3));

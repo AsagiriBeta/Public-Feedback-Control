@@ -300,9 +300,9 @@ if n_dummy >= 1 && use_db && (~isempty(sc_sum) || ~isempty(sc)) && ~isempty(ic)
             yline(ax, tgt_db, '-', 'Color', [0.85 0.35 0.10], 'LineWidth', 1.1, 'HandleVisibility', 'off');
         end
         h_dot = plot(ax, xs, sc_db, '.', 'Color', [0.55 0.70 0.90], 'MarkerSize', 9);
-        h_med = [];
+        h_avg = [];
         if numel(sc_db) >= 5
-            h_med = plot(ax, xs, movmedian(sc_db, 5), 'b-', 'LineWidth', 1.6);
+            h_avg = plot(ax, xs, movmean(sc_db, 5, 'omitnan'), 'b-', 'LineWidth', 1.6);
         end
         yline(ax, 0, ':', 'Color', [0.5 0.5 0.5], 'HandleVisibility', 'off');
         ylabel(ax, 'SC (dB re dummy)');
@@ -318,9 +318,9 @@ if n_dummy >= 1 && use_db && (~isempty(sc_sum) || ~isempty(sc)) && ~isempty(ic)
             hs(end+1) = h_dot; %#ok<AGROW>
             legs{end+1} = '2f\\pm20 kHz sum (Fig.6 blue)'; %#ok<AGROW>
         end
-        if ~isempty(h_med)
-            hs(end+1) = h_med; %#ok<AGROW>
-            legs{end+1} = '5-frame median of SUM'; %#ok<AGROW>
+        if ~isempty(h_avg)
+            hs(end+1) = h_avg; %#ok<AGROW>
+            legs{end+1} = '5-frame mean of SUM'; %#ok<AGROW>
         end
         if ~isempty(hs)
             legend(ax, hs, legs, 'Location', 'best');

@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PFC · DHO814 / DG2052</title>
 <link rel="stylesheet" href="vendor/uPlot.min.css">
-<link rel="stylesheet" href="app.css?v=nolabels3">
+<link rel="stylesheet" href="app.css?v=scharm1">
 <script src="vendor/uplot.iife.min.js"></script>
-<script src="app.js?v=nolabels3"></script>
+<script src="app.js?v=scband3"></script>
 <script defer src="vendor/alpine.min.js"></script>
 </head>
 <!-- 参数名与 MATLAB 侧存档字段一致（pfc_gui_params），两边共用一套词汇，
@@ -37,13 +37,26 @@
     </section>
 
     <section class="card">
-      <h2>超声参数 <span class="en">(2 / 3 / 4 共用)</span></h2>
+      <h2>超声参数 <span class="en">(2 / 3 用治疗电压；4 用假超声 / 步进 / 上限)</span></h2>
       <div class="row">
         <label>频率</label>
         <input type="number" step="0.01" x-model.number="p.freq_mhz" @input="onDutyDrivers(false)" @change="onDutyDrivers(true)" :disabled="busy">
         <span class="unit">MHz</span>
       </div>
-      <div class="row">
+      <!-- 换 PCD 时改观测谐波。本实验室 ~3 MHz 探头用 2f；文献 4.7 MHz 探头用 3f。 -->
+      <div class="row" style="grid-template-columns:74px 1fr 72px">
+        <label>SC 频点</label>
+        <select x-model="p.sc_harm" @change="pushParams(true)" :disabled="busy">
+          <option value="2f">2f 二次谐波</option>
+          <option value="3f">3f 三次谐波</option>
+          <option value="1.5f">1.5f</option>
+          <option value="1f">1f 基频</option>
+          <option value="0.5f">0.5f 次谐波</option>
+        </select>
+        <span class="unit" x-text="scHarmHint()"></span>
+      </div>
+      <!-- 闭环从假超声爬到上限，不读这一格。2/3 开环才用固定治疗电压。 -->
+      <div class="row" x-show="tab!=='fb'">
         <label>治疗电压</label>
         <input type="number" step="1" x-model.number="p.volt_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">mVpp</span>
@@ -80,14 +93,8 @@
         <input type="number" step="1" x-model.number="p.duration_s" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">s</span>
       </div>
-      <!-- 采样点 min/max 必须与 pfc_param_limits.m、web/app.js 一致（4096–100000）。
-           上限：100k WORD×2ch @ ~40 MSa/s ≈ 2.5 ms，USB 仍可接受；再往上（例如 400000）
-           传输变慢。超限必须立刻截断并显示截后值，不能让框里留着 400000、后端悄悄用 100000。 -->
-      <div class="row">
-        <label>采样点</label>
-        <input type="number" step="1024" min="4096" max="100000" x-model.number="p.npts" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
-        <span class="unit">pts</span>
-      </div>
+      <!-- 每帧示波器深度 p.npts 仍走缺省（40000）与 pfc_param_limits，不在界面改。
+           实验停表是上面的时长，不是采样点。 -->
     </section>
 
   </div>

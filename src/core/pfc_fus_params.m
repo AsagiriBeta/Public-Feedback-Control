@@ -31,9 +31,10 @@ p.npts    = min(p.npts, L.npts_max);
 p.target_db = opt(S, 'target_db', 2);
 p.max_mVpp  = opt(S, 'max_mVpp', 120);
 p.base_mVpp = opt(S, 'base_mVpp', 100);
-p.vstep_mVpp = opt(S, 'vstep_mVpp', 50);
+p.vstep_mVpp = opt(S, 'vstep_mVpp', 5);
 % 默认窗求和 = Fig.6 蓝线（3 MHz ±20 kHz）。峰/底可在界面改回去。
 p.ctrl_metric = pfc_ctrl_metric(S);
+[~, p.sc_harm] = pfc_sc_harm(S);
 p.mb_load_s = opt(S, 'mb_load_s', 15);
 p.amp_gain  = opt(S, 'amp_gain', 40);
 p.fs_target = 40e6;
@@ -65,7 +66,7 @@ if ~(isfinite(p.base_mVpp) && p.base_mVpp > 0)
 end
 p.base_mVpp = min(p.base_mVpp, p.max_mVpp);
 if ~(isfinite(p.vstep_mVpp) && p.vstep_mVpp > 0)
-    p.vstep_mVpp = 50;
+    p.vstep_mVpp = 5;
 end
 p.vstep_mVpp = min(p.vstep_mVpp, p.max_mVpp);
 if ~(isfinite(p.mb_load_s) && p.mb_load_s >= 0)

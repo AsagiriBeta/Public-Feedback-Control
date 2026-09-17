@@ -49,7 +49,8 @@ fs = 31.25e6;
 t = (0:3999) / fs;
 sine = @(a) a * sin(2 * pi * 1.5e6 * t);
 fails = fails + expect(~rigol_dho814_clipped(sine(0.0060), 0.002), '6.0 mV 正弦不判削顶');
-fails = fails + expect(~rigol_dho814_clipped(sine(0.0076), 0.002), '7.6 mV 正弦不判削顶');
+fails = fails + expect(~rigol_dho814_clipped(sine(0.0070), 0.002), '7.0 mV 正弦不判削顶');
+fails = fails + expect(rigol_dho814_clipped(sine(0.0076), 0.002), '7.6 mV（95% 满格）判削顶');
 fails = fails + expect(rigol_dho814_clipped(sign(sine(1)) * 0.0087, 0.002), '8.7 mV 平顶判削顶');
 fails = fails + expect(~rigol_dho814_clipped([], 0.002), '空帧不误判');
 
@@ -193,6 +194,13 @@ fails = fails + expect(strcmp(ppk.ctrl_metric, '2f_peak_over_floor'), '界面可
 Ssum = base; Ssum.ctrl_metric = '2f_window_sum';
 psum = pfc_fus_params(Ssum);
 fails = fails + expect(strcmp(psum.ctrl_metric, '2f_window_sum'), '界面可选窗求和');
+S3 = base; S3.sc_harm = '3f';
+p3h = pfc_fus_params(S3);
+fails = fails + expect(strcmp(p3h.sc_harm, '3f'), 'SC 频点可选 3f');
+B3 = pfc_cav_bands(1.5e6, '3f');
+fails = fails + expect(abs(B3.sc_mhz - 4.5) < 1e-9, '1.5 MHz × 3f = 4.5 MHz');
+B2 = pfc_cav_bands(1.5e6, '2f');
+fails = fails + expect(abs(B2.sc_mhz - 3.0) < 1e-9, '1.5 MHz × 2f = 3.0 MHz');
 
 fprintf('\n%s\n', repmat('-', 1, 46));
 if fails == 0

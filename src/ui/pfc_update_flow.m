@@ -14,7 +14,11 @@ if ~info.ok
     return;
 end
 if ~info.available
-    msgbox(sprintf('已是最新版本  v%s', info.current), '检查更新');
+    if ~isdeployed
+        msgbox(sprintf('已是最新版本  v%s\n\n本机 MATLAB 源码，无需从网络升级。', info.current), '检查更新');
+    else
+        msgbox(sprintf('已是最新版本  v%s', info.current), '检查更新');
+    end
     return;
 end
 
