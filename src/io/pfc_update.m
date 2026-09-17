@@ -9,7 +9,7 @@ function varargout = pfc_update(cmd, varargin)
 % ── 更新源 ──────────────────────────────────────────────────────────
 % 对用户完全透明：源写死在 default_source() 里，点「检查更新」直接用，
 % 界面上没有也不需要任何配置入口：
-%     https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
+%     https://raw.githubusercontent.com/jiaxuanli2504-cell/Public-Feedback-Control/main/update.json
 %
 % 只有运维需要换源时（内网服务器、局域网共享、隔离网无法回源）才用得上
 % <工作根>/pfc_update.ini 覆盖，界面上不暴露、出错时也不提示它：
@@ -66,7 +66,7 @@ function s = default_source()
 %DEFAULT_SOURCE 出厂默认更新源 —— 本项目在 GitHub 上的发布仓库。
 % 换仓库、换镜像只改这一处。想改用内网服务器 / 局域网共享，就在
 % <工作根>/pfc_update.ini 里写 source=… 覆盖（和 rigol_config.ini 一个套路）。
-s = 'https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json';
+s = 'https://raw.githubusercontent.com/jiaxuanli2504-cell/Public-Feedback-Control/main/update.json';
 end
 
 function s = read_source()
@@ -112,6 +112,16 @@ info = struct('ok', false, 'available', false, ...
     'current', pfc_version(), 'latest', '', 'url', '', 'notes', '', ...
     'error', '', 'source', '');
 
+% MATLAB 源码：本机仓库就是正在跑的版本，不连 GitHub、不弹超时。
+if ~isdeployed
+    info.ok = true;
+    info.available = false;
+    info.latest = info.current;
+    info.source = 'local';
+    info.notes = 'MATLAB 源码，本机即当前版本。';
+    return;
+end
+
 src = read_source();
 info.source = src;
 if isempty(src)
@@ -145,25 +155,70 @@ info.available = pfc_version('gt', info.latest, info.current);
 end
 
 function m = fetch_manifest(src)
-% 支持两种来源：http(s) 网址 与 本地/局域网共享路径
-if is_url(src)
-    try
-        % 加一次性参数（对 raw 的 CDN 无效，原因见 with_cache_buster）：发版后短时间内
-        % 仍可能读到旧清单，这是 GitHub raw 的固有行为，不是程序出错。
-        txt = webread(with_cache_buster(src), ...
-            weboptions('ContentType', 'text', 'Timeout', 15));
-    catch err
-        error('pfc:update:fetch', '%s\n来源：%s', ...
-            http_error_hint(char(string(err.message))), src);
+% 源码直接跑 MATLAB：读仓库里的 update.json，不访问外网。
+% 实验室点「检查更新」卡 15 秒，是 raw.githubusercontent.com 被墙/超时，不是程序坏了。
+if ~isdeployed
+    local = fullfile(pfc_root(), 'update.json');
+    if isfile(local)
+        m = parse_manifest(fileread(local), local);
+        return;
     end
+end
+if is_url(src)
+    txt = http_get_text(src);
 else
     if ~isfile(src)
         error('pfc:update:fetch', '找不到更新清单：%s', src);
     end
     txt = fileread(src);
 end
-
 m = parse_manifest(txt, src);
+end
+
+function txt = http_get_text(src)
+% 国内经常访问不了 raw.githubusercontent.com；按镜像依次试，单次 8 秒。
+urls = mirror_urls(src);
+last = '';
+for i = 1:numel(urls)
+    try
+        txt = webread(with_cache_buster(urls{i}), ...
+            weboptions('ContentType', 'text', 'Timeout', 8));
+        return;
+    catch err
+        last = char(string(err.message));
+    end
+end
+error('pfc:update:fetch', '%s\n来源：%s', http_error_hint(last), src);
+end
+
+function urls = mirror_urls(src)
+src = char(string(src));
+urls = {src};
+tok = regexp(src, 'github(?:usercontent)?\.com/([^/]+)/([^/]+)/(?:raw/)?(?:refs/heads/)?([^/]+)/(.+)$', 'tokens', 'once');
+if isempty(tok)
+    return;
+end
+user = tok{1};
+repo = tok{2};
+br = tok{3};
+path = tok{4};
+alts = {
+    sprintf('https://github.com/%s/%s/raw/%s/%s', user, repo, br, path)
+    sprintf('https://cdn.jsdelivr.net/gh/%s/%s@%s/%s', user, repo, br, path)
+    sprintf('https://raw.githubusercontent.com/%s/%s/%s/%s', user, repo, br, path)
+    };
+urls = {};
+seen = {};
+for i = 1:numel(alts)
+    u = alts{i};
+    if ~any(strcmp(seen, u))
+        seen{end+1} = u; %#ok<AGROW>
+        urls{end+1} = u; %#ok<AGROW>
+    end
+end
+if ~any(strcmp(seen, src))
+    urls{end+1} = src; %#ok<AGROW>
+end
 end
 
 function m = read_manifest_file(f)
@@ -225,14 +280,13 @@ end
 
 function s = http_error_hint(msg)
 %HTTP_ERROR_HINT 把底层报错翻译成人话。
-% 界面上不暴露更新源地址与配置文件：用户只要知道是「网络不通」还是「服务器上没这个清单」，
-% 技术细节附在括号里，方便排查但不干扰。
-msg = regexprep(msg, '[?&]_pfc=[\d.]+', '');   % 抹掉内部加的缓存参数，别让用户以为自己写错了
+msg = regexprep(msg, '[?&]_pfc=[\d.]+', '');
 if contains(msg, '404')
     s = sprintf(['更新服务器上找不到更新清单，请稍后重试。\n' ...
         '（若持续出现，请联系维护人员。）']);
 else
-    s = sprintf(['无法连接更新服务器，请确认本机可以访问外网后重试。\n' ...
+    s = sprintf(['无法连接 GitHub 更新源（国内访问 raw.githubusercontent.com 经常超时）。\n' ...
+        '用 MATLAB 源码做实验不必点「检查更新」，关对话框继续即可；代码以本机仓库为准。\n' ...
         '（技术细节：%s）'], msg);
 end
 end

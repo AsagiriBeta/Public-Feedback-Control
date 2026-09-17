@@ -1,18 +1,21 @@
 function varargout = pfc_visa(cmd, varargin)
-%PFC_VISA 示波器/信号源 visadev 单例，避免重复打开同一 USB 资源。
+%PFC_VISA 示波器/信号源 visadev 单例 + 全局采集会话锁。
 %  scope = pfc_visa('scope')
 %  fgen  = pfc_visa('fgen')
 %  pfc_visa('rf_off')
-%  pfc_visa('close')       % 断开当前连接（改了 VISA 地址后调用，下次采集重连）
+%  pfc_visa('rf_off_if', token)   % 只关自己这一轮，别把后来那一轮的射频也掐了
+%  pfc_visa('close')              % 断开当前连接（改了 VISA 地址后调用，下次采集重连）
 %  pfc_visa('reset_busy')
 %  tf    = pfc_visa('is_busy')
-%  ok    = pfc_visa('try_busy')     % 抢到运行权为 true
-%  pfc_visa('end_busy')
+%  [ok, token] = pfc_visa('try_busy', fig)  % 抢到运行权为 true；fig 是主人窗口
+%  pfc_visa('end_busy', token)    % token 对不上说明已经是别人的会话，不要解
+%  token = pfc_visa('token')
+%  tf    = pfc_visa('alive', token)        % 本轮是否还该继续（STOP / 关窗 / 被顶替）
+%  tf    = pfc_visa('owns', token)
+%  pfc_visa('abort_run')          % 关窗：置中止、关射频、释放 visadev 打断阻塞读
 
 global pfc_visa_state fgen
-if isempty(pfc_visa_state) || ~isstruct(pfc_visa_state)
-    pfc_visa_state = struct('scope', [], 'fgen', [], 'busy', false);
-end
+pfc_visa_state = ensure_state(pfc_visa_state);
 
 switch lower(cmd)
     case 'scope'
@@ -25,13 +28,12 @@ switch lower(cmd)
         fgen = pfc_visa_state.fgen;
         varargout{1} = pfc_visa_state.fgen;
     case 'rf_off'
-        try
-            if is_open(pfc_visa_state.fgen)
-                rigol_dg2052_output_set(pfc_visa_state.fgen, false);
-            elseif is_open(fgen)
-                rigol_dg2052_output_set(fgen, false);
-            end
-        catch
+        rf_off_now();
+    case 'rf_off_if'
+        token = [];
+        if ~isempty(varargin), token = varargin{1}; end
+        if owns_token(token)
+            rf_off_now();
         end
     case 'close'
         release_dev(pfc_visa_state.scope);
@@ -39,23 +41,156 @@ switch lower(cmd)
         pfc_visa_state.scope = [];
         pfc_visa_state.fgen = [];
         pfc_visa_state.busy = false;
+        pfc_visa_state.fig = [];
+        pfc_visa_state.gen = pfc_visa_state.gen + 1;
         clear global fgen
+        sync_appdata();
     case 'is_busy'
         varargout{1} = logical(pfc_visa_state.busy);
     case 'try_busy'
+        fig = [];
+        if ~isempty(varargin), fig = varargin{1}; end
+        % 旧窗口已经删了、循环还卡在 visadev 上：锁没有合法主人，允许新界面接手，
+        % 同时 gen+1 让旧循环的 token 立刻失效，避免两路抢同一台示波器。
+        if pfc_visa_state.busy && ~owner_alive()
+            pfc_visa_state.busy = false;
+            pfc_visa_state.fig = [];
+            pfc_visa_state.gen = pfc_visa_state.gen + 1;
+            release_dev(pfc_visa_state.scope);
+            pfc_visa_state.scope = [];
+        end
         if pfc_visa_state.busy
             varargout{1} = false;
-        else
-            pfc_visa_state.busy = true;
-            varargout{1} = true;
+            varargout{2} = snapshot_token();
+            return;
         end
+        pfc_visa_state.busy = true;
+        pfc_visa_state.fig = fig;
+        pfc_visa_state.gen = pfc_visa_state.gen + 1;
+        sync_appdata();
+        varargout{1} = true;
+        varargout{2} = snapshot_token();
     case 'end_busy'
+        token = [];
+        if ~isempty(varargin), token = varargin{1}; end
+        if ~isempty(token) && ~owns_token(token)
+            return;
+        end
         pfc_visa_state.busy = false;
-        pfc_visa('rf_off');
+        pfc_visa_state.fig = [];
+        rf_off_now();
+        sync_appdata();
     case 'reset_busy'
         pfc_visa_state.busy = false;
+        pfc_visa_state.fig = [];
+        sync_appdata();
+    case 'token'
+        varargout{1} = snapshot_token();
+    case 'alive'
+        token = [];
+        if ~isempty(varargin), token = varargin{1}; end
+        varargout{1} = session_alive(token);
+    case 'owns'
+        token = [];
+        if ~isempty(varargin), token = varargin{1}; end
+        varargout{1} = owns_token(token);
+    case 'abort_run'
+        % 关窗路径：不能在 CloseRequestFcn 里等循环结束（它嵌在 drawnow 里，会死锁）。
+        % 置中止、清主人窗口、关掉 visadev 让正在阻塞的 :WAVeform:DATA? 立刻失败。
+        global pfc_abort %#ok<GVMIS>
+        pfc_abort = true;
+        pfc_visa_state.fig = [];
+        rf_off_now();
+        release_dev(pfc_visa_state.scope);
+        pfc_visa_state.scope = [];
+        sync_appdata();
     otherwise
         error('pfc_visa:cmd', '未知命令 %s', cmd);
+end
+end
+
+function S = ensure_state(S)
+if isempty(S) || ~isstruct(S)
+    S = struct('scope', [], 'fgen', [], 'busy', false, 'fig', [], 'gen', 0);
+    return;
+end
+if ~isfield(S, 'busy'),  S.busy = false; end
+if ~isfield(S, 'fig'),   S.fig = []; end
+if ~isfield(S, 'gen') || isempty(S.gen), S.gen = 0; end
+if ~isfield(S, 'scope'), S.scope = []; end
+if ~isfield(S, 'fgen'),  S.fgen = []; end
+end
+
+function tok = snapshot_token()
+global pfc_visa_state
+pfc_visa_state = ensure_state(pfc_visa_state);
+tok = struct('gen', double(pfc_visa_state.gen), 'fig', pfc_visa_state.fig);
+end
+
+function tf = owns_token(token)
+global pfc_visa_state
+pfc_visa_state = ensure_state(pfc_visa_state);
+tf = false;
+if ~isstruct(token) || ~isfield(token, 'gen')
+    return;
+end
+tf = double(pfc_visa_state.gen) == double(token.gen);
+end
+
+function tf = owner_alive()
+global pfc_visa_state
+pfc_visa_state = ensure_state(pfc_visa_state);
+fig = pfc_visa_state.fig;
+if isempty(fig)
+    tf = false;
+    return;
+end
+try
+    tf = isvalid(fig);
+catch
+    tf = false;
+end
+end
+
+function tf = session_alive(token)
+% 本轮采集还该继续：没按 STOP、窗口还在、没被新一轮 try_busy 顶替。
+global pfc_abort pfc_visa_state %#ok<GVMIS>
+pfc_visa_state = ensure_state(pfc_visa_state);
+tf = false;
+if ~isempty(pfc_abort) && logical(pfc_abort)
+    return;
+end
+if ~pfc_visa_state.busy
+    return;
+end
+if ~isempty(token) && ~owns_token(token)
+    return;
+end
+if ~owner_alive()
+    return;
+end
+tf = true;
+end
+
+function rf_off_now()
+global pfc_visa_state fgen
+try
+    if is_open(pfc_visa_state.fgen)
+        rigol_dg2052_output_set(pfc_visa_state.fgen, false);
+    elseif is_open(fgen)
+        rigol_dg2052_output_set(fgen, false);
+    end
+catch
+end
+end
+
+function sync_appdata()
+% 挂在 groot 上：关掉 uifigure 之后还能查到「有没有一轮采集没退干净」。
+global pfc_visa_state
+try
+    setappdata(0, 'pfc_run', snapshot_token());
+    setappdata(0, 'pfc_run_busy', logical(pfc_visa_state.busy));
+catch
 end
 end
 
@@ -88,6 +223,12 @@ function dev = reuse_visadev(dev, addr)
 if is_open(dev)
     try, dev.Timeout = 60; catch, end
     return;
+end
+addr = strtrim(char(string(addr)));
+if isempty(addr)
+    error('pfc_visa:noAddr', ...
+        ['尚未配置仪器地址。\n请在界面点「仪器设置 → 扫描仪器」后保存。\n配置文件：%s'], ...
+        rigol_instr_config('file'));
 end
 cands = visa_candidates(addr);
 for i = 1:numel(cands)

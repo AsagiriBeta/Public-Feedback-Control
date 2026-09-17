@@ -2,7 +2,9 @@ function pfc_update_flow(fig)
 %PFC_UPDATE_FLOW 「检查更新」的完整交互流程（GUIDE 界面与网页界面共用）。
 % 更新源对用户透明、没有可配置项，因此只有两种结果：有更新 / 已是最新。
 if pfc_visa('is_busy')
-    warndlg('采集进行中，请先 STOP。', 'PFC');
+    if ~isempty(fig) && isvalid(fig)
+        pfc_ui_push(fig, struct('cmd', 'status', 'text', '采集进行中，请先 STOP FUS。'));
+    end
     return;
 end
 
@@ -12,7 +14,11 @@ if ~info.ok
     return;
 end
 if ~info.available
-    msgbox(sprintf('已是最新版本  v%s', info.current), '检查更新');
+    if ~isdeployed
+        msgbox(sprintf('已是最新版本  v%s\n\n本机 MATLAB 源码，无需从网络升级。', info.current), '检查更新');
+    else
+        msgbox(sprintf('已是最新版本  v%s', info.current), '检查更新');
+    end
     return;
 end
 

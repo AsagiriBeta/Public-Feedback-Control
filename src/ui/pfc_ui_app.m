@@ -3,8 +3,8 @@ function fig = pfc_ui_app()
 %
 % 界面本体是 web/ 下的静态页面，通过 uihtml 嵌进 uifigure；MATLAB 只负责仪器与算法，
 % 两者用 uihtml 的通道通信：
-%   MATLAB -> JS : h.Data = struct('cmd',...)      （见 pfc_ui_push）
-%   JS -> MATLAB : sendEventToMATLAB('action'|'params', ...)  -> pfc_ui_event
+%   MATLAB -> JS : sendEventToHTMLSource(h,'pfc',S)  （启动瞬间可写一次 h.Data）
+%   JS -> MATLAB : sendEventToMATLAB('action'|'params'|'ready', ...)  -> pfc_ui_event
 % 相比 GUIDE：布局交给 CSS（自适应/DPI/圆角全不用手写），图表交给 uPlot。
 root = pfc_web_root();
 src = fullfile(root, 'index.html');
@@ -14,11 +14,17 @@ end
 
 C = pfc_ui_colors();
 scr = get(0, 'ScreenSize');
-W = min(1500, max(1080, scr(3) - 80));
-H = min(940, max(700, scr(4) - 130));
+% 先按「舒服的默认尺寸」估，再钳进当前屏，避免高 DPI / 小笔记本上窗口伸出屏幕，
+% 把右下角 STOP 裁到任务栏下面。
+availW = max(640, scr(3) - 40);
+availH = max(480, scr(4) - 80);
+W = min([1500, max(1080, scr(3) - 80), availW]);
+H = min([940, max(700, scr(4) - 130), availH]);
+left = max(10, min(60, scr(3) - W - 10));
+bottom = max(10, min(60, scr(4) - H - 10));
 
 fig = uifigure('Name', ['PFC  ·  DHO814 / DG2052  ·  ' pfc_version('label')], ...
-    'Color', C.fig, 'Position', [60 60 W H]);
+    'Color', C.fig, 'Position', [left bottom W H]);
 
 try
     g = uigridlayout(fig, [1 1]);
@@ -29,7 +35,14 @@ catch
     h = uihtml(fig);
     h.Position = [1 1 W - 2 H - 2];
 end
+% HTMLSource 只设这一次。之后只走 Data / sendEventToHTMLSource；
+% 再赋值 HTMLSource（含清空再设）会整页重载，MATLAB 弹出
+% 「HTMLSource 可能引用不受支持的功能」警告，Alpine 状态丢失。
 h.HTMLSource = src;
+try, h.Scrollable = 'off'; catch, end
+% 首次加载时 MATLAB 可能仍提示「HTMLSource 可能引用不受支持的功能」：
+% Alpine 用 new Function 解析 x-model / 表达式，属于 uihtml 已知限制，不是运行时 JS 错误。
+% 不要为此重设 HTMLSource（清空再赋值会整页闪烁、按钮状态丢失）。
 
 S = pfc_prefs('get');
 setappdata(fig, 'pfc_html', h);
@@ -38,17 +51,20 @@ setappdata(fig, 'pfc_params', S);
 h.HTMLEventReceivedFcn = @(src, evt) pfc_ui_event(fig, evt);
 set(fig, 'CloseRequestFcn', @(s, ~) pfc_ui_close(s));
 
-pfc_ui_push(fig, struct('cmd', 'init', 'params', S));
+% 页面未就绪时 sendEventToHTMLSource 会丢；Data 会由 JS setup() 补读一次。
+% 这里故意不 drawnow，避免 CEF 还没跑 setup 就刷一遍空页。
+try
+    h.Data = struct('cmd', 'init', 'params', S);
+catch
+end
 end
 
 % ---------------------------------------------------------------- 关闭
 function pfc_ui_close(fig)
-% 关窗 = 停一切：先置中止标志、关射频，再存参数、删窗口。
-% 采集循环只看 pfc_abort，不设它的话关掉窗口后实验会继续跑、射频一直开着
-% （只是碰巧在下一次 ui.status 处因句柄失效报错才停），而用户按了 X 会以为已经停了。
-global pfc_abort %#ok<GVMIS>
-pfc_abort = true;
-try, pfc_visa('rf_off'); catch, end
+% 关窗 = 停一切：置中止、关射频、释放 visadev（打断正在阻塞的波形读），再存参数、删窗口。
+% 不能在这里 wait 采集循环 —— CloseRequestFcn 是从循环里的 drawnow 嵌进来的，一等就死锁。
+% 循环用 pfc_visa('alive', token) 看到窗口没了 / abort 就会自己退。
+try, pfc_visa('abort_run'); catch, end
 try
     pfc_prefs('save', getappdata(fig, 'pfc_params'));
 catch
@@ -93,6 +109,14 @@ switch name
             apply_params(fig, data.params, false);
         end
         pfc_ui_action(fig, act);
+
+    case 'ready'    % JS setup() 完成，再推一次 MATLAB 存档，避免页面先显示 JS 缺省 2 dB
+        % 不要在这里吞 JS 表单：setup 瞬间 Alpine 还是出厂缺省（target_db=2），
+        % 若先 merge 会把上次 prefs 里的 3 盖成 2，界面闪 2、实验却按错的数跑。
+        S = getappdata(fig, 'pfc_params');
+        if isstruct(S)
+            pfc_ui_push(fig, struct('cmd', 'init', 'params', S));
+        end
 end
 end
 
@@ -114,19 +138,36 @@ function S = merge_params(S, D)
 if ~isstruct(D) || ~isstruct(S)
     return;
 end
+allow = {};
+try
+    allow = fieldnames(pfc_prefs('defaults'));
+catch
+end
+extra = {'cav_pct', 'amp_gain', 'ctrl_metric', 'target_db', 'sc_harm'};
 fn = fieldnames(D);
 for i = 1:numel(fn)
     k = fn{i};
-    if ~isfield(S, k)
+    % 允许网页新增字段写进缓存；target_db 必须总能合并，不能因为旧缓存缺字段就丢掉。
+    if ~isfield(S, k) && ~any(strcmp(k, allow)) && ~any(strcmp(k, extra))
         continue;
     end
     v = D.(k);
+    if iscell(v) && isscalar(v)
+        v = v{1};
+    end
     if isnumeric(v)
         if isscalar(v) && isfinite(v)
             S.(k) = double(v);
         end
     elseif ischar(v) || isstring(v)
-        S.(k) = char(v);
+        s = strtrim(char(v));
+        n = str2double(s);
+        % 数字框经 uihtml 变成字符串时（「2」「3.0」）仍按数值写入，否则闭环会退回缺省 2 dB。
+        if isfinite(n) && ~strcmpi(k, 'studyID') && ~strcmpi(k, 'directory') && ~strcmpi(k, 'ctrl_metric') && ~strcmpi(k, 'sc_harm')
+            S.(k) = n;
+        else
+            S.(k) = s;
+        end
     end
 end
 end
@@ -141,17 +182,19 @@ ui = pfc_ui_html(fig);
 % 不需要独占仪器的动作，先处理掉
 switch act
     case 'stop'
-        % STOP 任何时候都要能按：不抢锁，直接停
+        % STOP 任何时候都要能按：不抢锁，直接停。不弹窗。
         global pfc_abort %#ok<GVMIS>
         pfc_abort = true;
         pfc_visa('rf_off');
+        pfc_ui_push(fig, struct('cmd', 'countdown', 'on', false));
+        pfc_ui_push(fig, struct('cmd', 'status', 'text', '正在停止…'));
         return;
     case 'browse'
         act_browse(fig);
         return;
     case 'instr'
         if pfc_visa('is_busy')
-            warndlg('采集进行中，请先 STOP。', 'PFC');
+            pfc_ui_push(fig, struct('cmd', 'status', 'text', '采集进行中，请先 STOP FUS。'));
         else
             pfc_instr_dialog();
         end
@@ -161,31 +204,115 @@ switch act
         return;
 end
 
-% 以下动作要独占仪器：先抢运行锁，锁住前端按钮，结束（含出错）自动解锁
-if ~pfc_visa('try_busy')
-    warndlg('已有采集在运行。请等待结束，或按 STOP FUS。', 'PFC');
+% 以下动作要独占仪器：先抢运行锁，锁住前端按钮，结束（含出错）自动解锁。
+% 已经在跑就只切到该步骤 / 写状态行，绝不 warndlg —— 连点 + 旧循环 drawnow
+% 会把对话框堆成风暴，电脑像死机，STOP 也被挡住。
+[ok, token] = pfc_visa('try_busy', fig);
+if ~ok
+    t = step_tab(act);
+    sameFig = false;
+    try
+        sameFig = isstruct(token) && isfield(token, 'fig') && ...
+            ~isempty(token.fig) && isvalid(token.fig) && token.fig == fig;
+    catch
+    end
+    if sameFig
+        % 本窗口已经在跑：把 busy 钉回去（页面刷新会把乐观锁弄丢）
+        busyS = struct('cmd', 'busy', 'on', true);
+        if ~isempty(t), busyS.tab = t; end
+        pfc_ui_push(fig, busyS);
+    else
+        % 别的窗口/旧循环还在：本页不要卡在「假 busy」，否则 STOP 键会变成死锁
+        pfc_ui_push(fig, struct('cmd', 'busy', 'on', false));
+        if ~isempty(t)
+            pfc_ui_push(fig, struct('cmd', 'tab', 'tab', t));
+        end
+    end
+    pfc_ui_push(fig, struct('cmd', 'status', 'text', '已有采集在运行。请按 STOP FUS。'));
     return;
 end
-pfc_ui_push(fig, struct('cmd', 'busy', 'on', true));
-cleanup = onCleanup(@() unbusy(fig)); %#ok<NASGU>
+% 实验一开始就把前端切到该步骤页（页签按步骤分，不是按时域/趋势分）。
+busyS = struct('cmd', 'busy', 'on', true);
+t = step_tab(act);
+if ~isempty(t)
+    busyS.tab = t;
+end
+pfc_ui_push(fig, busyS);
+cleanup = onCleanup(@() unbusy(fig, token)); %#ok<NASGU>
 
 try
     switch act
         case 'oneshot',  pfc_oneshot(ui);
         case 'debug',    pfc_debug_run(ui);
-        case 'noMB',     pfc_run_experiment('before', ui);
-        case 'openMB',   pfc_run_experiment('open_mb', ui);
-        case 'feedback', pfc_run_experiment('feedback', ui);
+        case 'noMB'
+            warn_amp(fig);
+            pfc_run_experiment('before', ui);
+        case 'openMB'
+            warn_amp(fig);
+            pfc_run_experiment('open_mb', ui);
+        case 'feedback'
+            warn_amp(fig);
+            pfc_run_experiment('feedback', ui);
     end
 catch err
-    errordlg(err.message, 'PFC 运行出错');
+    % 关窗 / STOP 引起的 visadev 失败不是用户要看的错误
+    if ~is_stop_noise(err)
+        pfc_ui_push(fig, struct('cmd', 'status', 'text', err.message));
+        if isvalid(fig)
+            errordlg(err.message, 'PFC 运行出错');
+        end
+    end
 end
 end
 
-function unbusy(fig)
-pfc_visa('end_busy');
-if ~isempty(fig) && isvalid(fig)
+function unbusy(fig, token)
+if nargin < 2, token = []; end
+% 先看是不是自己这一轮：end_busy 会把 gen 清掉主人，之后就分不清了。
+owned = isempty(token) || pfc_visa('owns', token);
+pfc_visa('end_busy', token);
+if owned && ~isempty(fig) && isvalid(fig)
     pfc_ui_push(fig, struct('cmd', 'busy', 'on', false));
+end
+end
+
+function tf = is_stop_noise(err)
+global pfc_abort %#ok<GVMIS>
+if ~isempty(pfc_abort) && logical(pfc_abort)
+    tf = true;
+    return;
+end
+msg = '';
+try, msg = err.message; catch, end
+tf = contains(msg, 'invalid', 'IgnoreCase', true) || ...
+    contains(msg, 'deleted', 'IgnoreCase', true) || ...
+    contains(msg, 'closed', 'IgnoreCase', true);
+end
+
+function warn_amp(fig)
+%WARN_AMP 2/3/4 起步时一行状态提醒开功放。不要弹窗——连点会堆成风暴。
+S = getappdata(fig, 'pfc_params');
+g = 40;
+if isstruct(S) && isfield(S, 'amp_gain') && isnumeric(S.amp_gain) && isfinite(S.amp_gain)
+    g = double(S.amp_gain);
+end
+if g >= 40
+    pfc_ui_push(fig, struct('cmd', 'status', 'text', sprintf('确认功放已开 ×%.4g', g)));
+end
+end
+
+function t = step_tab(act)
+% 前端步骤页签名：调试 / 2 无微泡 / 3 开环 / 4 闭环
+switch act
+    case {'oneshot', 'debug'}
+        t = 'debug';
+    case 'noMB'
+        t = 'nomb';
+    case 'openMB'
+        t = 'open';
+    case 'feedback'
+        t = 'fb';
+    otherwise
+        t = '';
 end
 end
 

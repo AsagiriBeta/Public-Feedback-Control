@@ -4,6 +4,8 @@ cfg = rigol_instr_config();
 ch = cfg.awg_channel;
 out = sprintf('OUTPut%d', ch);
 if on
+    % 打开前再钉一次 50 Ω，避免前面板被人拨回高阻。
+    writeline(dev, [':' out ':LOAD 50']);
     writeline(dev, [':' out ':STATe ON']);
 else
     writeline(dev, [':' out ':STATe OFF']);

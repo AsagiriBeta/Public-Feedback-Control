@@ -1,16 +1,9 @@
 function pfc_instr_dialog()
-%PFC_INSTR_DIALOG 仪器设置：自动扫描 + 选择 + 手动输入。
+%PFC_INSTR_DIALOG 仪器设置：扫描、指派、试连接、保存到 rigol_config.ini。
 %
-% 「仪器设置」按钮的实体。相比早先只有两个输入框的 inputdlg，这里可以：
-%   1) 一键扫描本机 VISA 资源（visadevlist + *IDN?），列出型号与序列号；
-%   2) 选中一行、点「设为示波器 / 设为信号源」直接指派，不用手抄 VISA 地址；
-%   3) 扫描不到时（没装 NI-VISA、走 LAN 且未广播等）仍可手动输入地址兜底。
-%
-% 保存写入 <工作根>/rigol_config.ini 并断开现有连接，下次采集按新地址重连。
-% 采集进行中不允许打开（调用方已用 pfc_visa('is_busy') 拦截，这里再兜一层）。
+% 用 uifigure（不是 figure），避免钻到主窗口后面。
+% 扫描只填空栏，已有地址要用「设为示波器 / 设为信号源」才会覆盖。
 C = pfc_ui_colors();
-W = 660;
-H = 480;
 
 if pfc_visa('is_busy')
     warndlg('采集进行中，请先 STOP。', 'PFC');
@@ -19,60 +12,89 @@ end
 
 cfg = rigol_instr_config();
 S = struct('devs', []);
+fn = ui_font();
 
-% 宽度先算好：[] 里的 "W - 28" 会被当成 3 个元素（空格是分隔符），必须用变量
-innerW = W - 28;
-editX = 104;
-editW = W - editX - 14;
-statX = 142;
-statW = W - statX - 14;
+fig = uifigure('Name', '仪器设置 / Instruments', ...
+    'Color', C.fig, 'Position', [100 80 760 560], ...
+    'Resize', 'on', 'WindowStyle', 'modal', 'Visible', 'off');
+fig.CloseRequestFcn = @(src, ~) delete(src);
 
-fig = figure('Name', '仪器设置 / Instruments', 'NumberTitle', 'off', ...
-    'MenuBar', 'none', 'ToolBar', 'none', 'Resize', 'off', ...
-    'Color', C.fig, 'Units', 'pixels', 'Position', [120 120 W H], ...
-    'WindowStyle', 'modal', 'Visible', 'off');
-movegui(fig, 'center');
+g = uigridlayout(fig, [8 1]);
+g.BackgroundColor = C.fig;
+g.Padding = [14 12 14 12];
+g.RowSpacing = 8;
+g.RowHeight = {28, 36, '1x', 36, 34, 34, 34, 40};
 
-mk_text(fig, C, [14 444 innerW 24], ...
-    '点「扫描仪器」列出现有设备；选中一行后指派，或直接在下面输入地址。', C.muted);
-mk_btn(fig, C, [14 406 120 30], '扫描仪器', C.btn, @do_scan);
-stat = mk_text(fig, C, [statX 406 statW 30], '尚未扫描。', C.text);
+hint = uilabel(g, 'Text', ...
+    '先「扫描仪器」；空栏会自动填入识别到的型号。已有地址请选中后点「设为」。', ...
+    'FontColor', C.muted, 'FontName', fn, 'FontSize', 11, 'WordWrap', 'on'); %#ok<NASGU>
+hint.Layout.Row = 1;
 
-list = uicontrol('Parent', fig, 'Style', 'listbox', 'Units', 'pixels', ...
-    'Position', [14 196 innerW 200], 'String', {'（点「扫描仪器」开始）'}, ...
-    'BackgroundColor', C.editBg, 'ForegroundColor', C.editFg, ...
-    'FontName', ui_font(), 'FontSize', 10, 'Value', 1);
+row2 = uigridlayout(g, [1 3]);
+row2.Layout.Row = 2;
+row2.BackgroundColor = C.fig;
+row2.ColumnWidth = {110, 90, '1x'};
+row2.Padding = [0 0 0 0];
+row2.ColumnSpacing = 8;
+mk_btn(row2, C, fn, '扫描仪器', C.btn, @(~, ~) do_scan());
+mk_btn(row2, C, fn, '试连接', C.btn2, @(~, ~) do_test());
+stat = uilabel(row2, 'Text', '尚未扫描。', 'FontColor', C.text, ...
+    'FontName', fn, 'FontSize', 11, 'WordWrap', 'on');
 
-mk_btn(fig, C, [14 156 150 30], '↓ 设为示波器', C.btn2, @(~, ~) assign('scope'));
-mk_btn(fig, C, [172 156 150 30], '↓ 设为信号源', C.btn2, @(~, ~) assign('awg'));
+list = uilistbox(g, 'Items', {'（点「扫描仪器」开始）'}, ...
+    'FontName', fn, 'FontSize', 11, ...
+    'BackgroundColor', C.editBg, 'FontColor', C.editFg);
+list.Layout.Row = 3;
 
-mk_text(fig, C, [14 116 86 22], '示波器', C.text);
-scope_e = mk_edit(fig, C, [editX 112 editW 28], char(cfg.scope_visa));
+row4 = uigridlayout(g, [1 2]);
+row4.Layout.Row = 4;
+row4.BackgroundColor = C.fig;
+row4.Padding = [0 0 0 0];
+row4.ColumnSpacing = 8;
+mk_btn(row4, C, fn, '↓ 设为示波器', C.btn2, @(~, ~) assign('scope'));
+mk_btn(row4, C, fn, '↓ 设为信号源', C.btn2, @(~, ~) assign('awg'));
 
-mk_text(fig, C, [14 76 86 22], '信号源', C.text);
-awg_e = mk_edit(fig, C, [editX 72 editW 28], char(cfg.awg_visa));
+[scope_e] = mk_addr_row(g, C, fn, 5, '示波器', char(cfg.scope_visa));
+[awg_e]   = mk_addr_row(g, C, fn, 6, '信号源', char(cfg.awg_visa));
 
-mk_btn(fig, C, [14 16 120 34], '保存', C.btn, @do_save);
-mk_btn(fig, C, [142 16 120 34], '取消', C.btn2, @(~, ~) delete(fig));
+row7 = uigridlayout(g, [1 4]);
+row7.Layout.Row = 7;
+row7.BackgroundColor = C.fig;
+row7.Padding = [0 0 0 0];
+row7.ColumnWidth = {'fit', 'fit', 'fit', '1x'};
+row7.ColumnSpacing = 20;
+tx_sp  = mk_ch_pair(row7, C, fn, '回读 CH', cfg.scope_tx_channel, [1 4]);
+pcd_sp = mk_ch_pair(row7, C, fn, 'PCD CH', cfg.scope_pcd_channel, [1 4]);
+awg_sp = mk_ch_pair(row7, C, fn, '信号源 CH', cfg.awg_channel, [1 2]);
 
-set(fig, 'UserData', S);
-set(fig, 'Visible', 'on');
+row8 = uigridlayout(g, [1 3]);
+row8.Layout.Row = 8;
+row8.BackgroundColor = C.fig;
+row8.Padding = [0 0 0 0];
+row8.ColumnWidth = {110, 110, '1x'};
+row8.ColumnSpacing = 8;
+mk_btn(row8, C, fn, '保存', C.btn, @(~, ~) do_save());
+mk_btn(row8, C, fn, '取消', C.btn2, @(~, ~) delete(fig));
+uilabel(row8, 'Text', ['配置文件：' rigol_instr_config('file')], ...
+    'FontColor', C.muted, 'FontName', fn, 'FontSize', 10, 'WordWrap', 'on');
+
+fig.Visible = 'on';
 uiwait(fig);
 
-% ------------------------------------------------------------ 嵌套回调
+% ------------------------------------------------------------ 回调
 
-    function do_scan(~, ~)
-        set(stat, 'String', '正在扫描 VISA 资源…', 'ForegroundColor', C.text);
+    function do_scan()
+        stat.Text = '正在扫描 VISA 资源…';
+        stat.FontColor = C.text;
         drawnow;
-        % 扫描会临时打开资源：先释放本程序占用的连接，否则示波器会被判成「资源被占用」
         pfc_visa('close');
         [devs, msg] = rigol_scan_instruments();
         S.devs = devs;
-        set(fig, 'UserData', S);
 
         if isempty(devs)
-            set(list, 'String', {'（没有发现 VISA 资源）'}, 'Value', 1);
-            set(stat, 'String', msg, 'ForegroundColor', C.warn);
+            set_list_items(list, {'（没有发现 VISA 资源）'});
+            stat.Text = msg;
+            stat.FontColor = C.warn;
             return;
         end
 
@@ -80,76 +102,216 @@ uiwait(fig);
         for i = 1:numel(devs)
             lines{i} = dev_line(devs(i));
         end
-        set(list, 'String', lines, 'Value', 1);
+        set_list_items(list, lines);
 
         sc = pick(devs, 'scope');
         aw = pick(devs, 'awg');
         filled = {};
+        skipped = {};
         if ~isempty(sc)
-            set(scope_e, 'String', sc);
-            filled{end + 1} = '示波器'; %#ok<AGROW>
+            if isempty(edit_str(scope_e))
+                scope_e.Value = sc;
+                filled{end + 1} = '示波器'; %#ok<AGROW>
+            else
+                skipped{end + 1} = '示波器'; %#ok<AGROW>
+            end
         end
         if ~isempty(aw)
-            set(awg_e, 'String', aw);
-            filled{end + 1} = '信号源'; %#ok<AGROW>
+            if isempty(edit_str(awg_e))
+                awg_e.Value = aw;
+                filled{end + 1} = '信号源'; %#ok<AGROW>
+            else
+                skipped{end + 1} = '信号源'; %#ok<AGROW>
+            end
         end
 
         txt = sprintf('扫描到 %d 个资源。', numel(devs));
-        if isempty(filled)
-            txt = [txt ' 未能自动判定型号，请选中后手动指派。'];
-            set(stat, 'String', txt, 'ForegroundColor', C.warn);
-        else
-            txt = [txt ' 已自动填入：' strjoin(filled, ' / ') '。确认后点「保存」。'];
-            set(stat, 'String', txt, 'ForegroundColor', C.text);
+        if ~isempty(filled)
+            txt = [txt ' 空栏已填：' strjoin(filled, ' / ') '。'];
         end
+        if ~isempty(skipped)
+            txt = [txt ' 已有地址未改（' strjoin(skipped, ' / ') '），要用列表「设为」才覆盖。'];
+        end
+        if isempty(filled) && isempty(skipped)
+            txt = [txt ' 未能自动判定型号，请选中后点「设为」。'];
+            stat.FontColor = C.warn;
+        else
+            stat.FontColor = C.text;
+        end
+        stat.Text = txt;
     end
 
     function assign(role)
         if isempty(S.devs)
-            warndlg('请先点「扫描仪器」。', 'PFC');
+            uialert(fig, '请先点「扫描仪器」。', 'PFC', 'Icon', 'warning');
             return;
         end
-        v = get(list, 'Value');
-        v = max(1, min(numel(S.devs), v));
-        addr = S.devs(v).visa;
+        idx = selected_index(list, S.devs);
+        if isempty(idx)
+            uialert(fig, '请先在列表里选中一台仪器。', 'PFC', 'Icon', 'warning');
+            return;
+        end
+        addr = S.devs(idx).visa;
         if strcmp(role, 'scope')
-            set(scope_e, 'String', addr);
+            scope_e.Value = addr;
             who = '示波器';
         else
-            set(awg_e, 'String', addr);
+            awg_e.Value = addr;
             who = '信号源';
         end
-        set(stat, 'String', sprintf('已把 %s 指派给%s。', addr, who), ...
-            'ForegroundColor', C.text);
+        stat.Text = sprintf('已把 %s 指派给%s。', addr, who);
+        stat.FontColor = C.text;
     end
 
-    function do_save(~, ~)
-        s1 = strtrim(char(get(scope_e, 'String')));
-        s2 = strtrim(char(get(awg_e, 'String')));
-        if isempty(s1) || isempty(s2)
-            warndlg('示波器与信号源的 VISA 地址都不能为空。', 'PFC');
+    function do_test()
+        s1 = edit_str(scope_e);
+        s2 = edit_str(awg_e);
+        if isempty(s1) && isempty(s2)
+            uialert(fig, '请先扫描或填写地址。', 'PFC', 'Icon', 'warning');
             return;
         end
-        if strcmp(s1, s2)
-            warndlg('示波器与信号源填了同一个 VISA 地址，请确认。', 'PFC');
+        if ~isempty(s1) && ~isempty(s2) && visa_same(s1, s2)
+            uialert(fig, '两个地址指向同一台仪器，请分开指派后再试。', 'PFC', 'Icon', 'warning');
+            return;
+        end
+        stat.Text = '正在试连接…';
+        stat.FontColor = C.text;
+        drawnow;
+        pfc_visa('close');
+        parts = {};
+        allok = true;
+        if ~isempty(s1)
+            [ok, m] = probe_one(s1, '示波器');
+            parts{end + 1} = m; %#ok<AGROW>
+            allok = allok && ok;
+        end
+        if ~isempty(s2)
+            [ok, m] = probe_one(s2, '信号源');
+            parts{end + 1} = m; %#ok<AGROW>
+            allok = allok && ok;
+        end
+        stat.Text = strjoin(parts, '  |  ');
+        if allok
+            stat.FontColor = C.text;
+        else
+            stat.FontColor = C.warn;
+        end
+    end
+
+    function do_save()
+        s1 = edit_str(scope_e);
+        s2 = edit_str(awg_e);
+        if isempty(s1) || isempty(s2)
+            uialert(fig, '示波器与信号源的 VISA 地址都不能为空。请先扫描。', 'PFC', 'Icon', 'warning');
+            return;
+        end
+        if visa_same(s1, s2)
+            uialert(fig, '示波器与信号源是同一台仪器（地址写法可能不同），不能保存。', 'PFC', 'Icon', 'warning');
+            return;
+        end
+        tx = round(tx_sp.Value);
+        pcd = round(pcd_sp.Value);
+        aw = round(awg_sp.Value);
+        if tx == pcd
+            uialert(fig, '回读通道与 PCD 通道不能相同。', 'PFC', 'Icon', 'warning');
             return;
         end
         cfg.scope_visa = s1;
         cfg.awg_visa = s2;
+        cfg.scope_tx_channel = tx;
+        cfg.scope_pcd_channel = pcd;
+        cfg.awg_channel = aw;
         try
             rigol_instr_config('save', cfg);
-            pfc_visa('close');     % 释放旧连接，下次采集按新地址重连
+            pfc_visa('close');
         catch err
-            errordlg(err.message, '仪器设置');
+            uialert(fig, err.message, '仪器设置', 'Icon', 'error');
             return;
         end
         delete(fig);
-        msgbox(sprintf('已保存到：\n%s\n\n下次采集将按新地址连接。', ...
-            rigol_instr_config('file')), '仪器设置');
     end
 end
 
 % ------------------------------------------------------------ 局部工具
+
+function s = edit_str(h)
+s = strtrim(char(string(h.Value)));
+end
+
+function set_list_items(list, items)
+% 先换成占位再赋新列表：旧 Value 不在新 Items 里时 uilistbox 会直接报错。
+placeholder = {' '};
+try
+    list.Items = placeholder;
+    list.Value = placeholder{1};
+catch
+end
+list.Items = items;
+if ~isempty(items)
+    try
+        list.Value = items{1};
+    catch
+    end
+end
+end
+
+function tf = visa_same(a, b)
+na = rigol_visa_norm(a);
+nb = rigol_visa_norm(b);
+tf = ~isempty(na) && strcmpi(na, nb);
+end
+
+function idx = selected_index(list, devs)
+idx = [];
+val = list.Value;
+if iscell(val)
+    if isempty(val)
+        return;
+    end
+    val = val{1};
+end
+items = list.Items;
+if ischar(items) || isstring(items)
+    items = cellstr(string(items));
+end
+k = find(strcmp(items, char(string(val))), 1);
+if isempty(k) || k > numel(devs)
+    return;
+end
+idx = k;
+end
+
+function [ok, msg] = probe_one(addr, who)
+ok = false;
+dev = [];
+try
+    dev = visadev(addr);
+    dev.Timeout = 3;
+    idn = strtrim(char(writeread(dev, '*IDN?')));
+    if isempty(idn)
+        msg = sprintf('%s：无 *IDN? 应答', who);
+    else
+        ok = true;
+        msg = sprintf('%s OK  %s', who, idn);
+    end
+catch e
+    msg = sprintf('%s失败：%s', who, short_ui_err(e.message));
+end
+try
+    if ~isempty(dev)
+        delete(dev);
+    end
+catch
+end
+end
+
+function s = short_ui_err(msg)
+s = regexprep(char(string(msg)), '<[^>]+>', '');
+s = strtrim(regexprep(s, '\s+', ' '));
+if numel(s) > 80
+    s = [s(1:77) '...'];
+end
+end
 
 function s = dev_line(d)
 tag = upper(d.role);
@@ -179,28 +341,43 @@ for i = 1:numel(devs)
 end
 end
 
-function h = mk_text(parent, C, pos, str, col)
-if nargin < 5 || isempty(col)
-    col = C.text;
-end
-h = uicontrol('Parent', parent, 'Style', 'text', 'Units', 'pixels', ...
-    'Position', pos, 'String', str, 'BackgroundColor', C.fig, ...
-    'ForegroundColor', col, 'HorizontalAlignment', 'left', ...
-    'FontName', ui_font(), 'FontSize', 10);
+function h = mk_btn(parent, C, fn, str, face, cb)
+h = uibutton(parent, 'Text', str, 'ButtonPushedFcn', cb, ...
+    'BackgroundColor', face, 'FontColor', C.btnFg, ...
+    'FontName', fn, 'FontSize', 11, 'FontWeight', 'bold');
 end
 
-function h = mk_edit(parent, C, pos, str)
-h = uicontrol('Parent', parent, 'Style', 'edit', 'Units', 'pixels', ...
-    'Position', pos, 'String', str, 'BackgroundColor', C.editBg, ...
-    'ForegroundColor', C.editFg, 'HorizontalAlignment', 'left', ...
-    'FontName', ui_font(), 'FontSize', 10);
+function ed = mk_addr_row(g, C, fn, row, label, val)
+rowg = uigridlayout(g, [1 2]);
+rowg.Layout.Row = row;
+rowg.BackgroundColor = C.fig;
+rowg.Padding = [0 0 0 0];
+rowg.ColumnWidth = {70, '1x'};
+rowg.ColumnSpacing = 8;
+uilabel(rowg, 'Text', label, 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
+ed = uieditfield(rowg, 'text', 'Value', val, ...
+    'FontName', fn, 'FontSize', 11, ...
+    'BackgroundColor', C.editBg, 'FontColor', C.editFg);
 end
 
-function h = mk_btn(parent, C, pos, str, face, cb)
-h = uicontrol('Parent', parent, 'Style', 'pushbutton', 'Units', 'pixels', ...
-    'Position', pos, 'String', str, 'BackgroundColor', face, ...
-    'ForegroundColor', C.btnFg, 'FontName', ui_font(), 'FontSize', 10.5, ...
-    'FontWeight', 'bold', 'Callback', cb);
+function sp = mk_ch_pair(parent, C, fn, label, val, lim)
+% 标签贴着数字框，避免 6 列被拉满窗口后「回读」对上别人的通道。
+g = uigridlayout(parent, [1 2]);
+g.BackgroundColor = C.fig;
+g.Padding = [0 0 0 0];
+g.ColumnWidth = {'fit', 72};
+g.ColumnSpacing = 6;
+uilabel(g, 'Text', label, 'FontColor', C.text, 'FontName', fn, 'FontSize', 11);
+sp = mk_spin(g, C, fn, val, lim);
+end
+
+function sp = mk_spin(parent, C, fn, val, lim)
+if ~(isfinite(val) && val >= lim(1) && val <= lim(2))
+    val = lim(1);
+end
+sp = uispinner(parent, 'Value', val, 'Limits', lim, 'RoundFractionalValues', 'on', ...
+    'FontName', fn, 'FontSize', 11, ...
+    'BackgroundColor', C.editBg, 'FontColor', C.editFg);
 end
 
 function n = ui_font()
