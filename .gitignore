@@ -3,6 +3,10 @@
 Thumbs.db
 desktop.ini
 
+# ── 云盘同步临时文件（仓库放在 BaiduSyncdisk 下时生成）─────────────────
+# 形如 pfc_version.m.baiduyun.uploading.cfg，随同步状态出现/消失，不入库。
+*.baiduyun.*
+
 # ── MATLAB 编辑器临时产物 ────────────────────────────────────────────
 *.asv
 *.m~
@@ -40,5 +44,6 @@ pfc_update.ini
 .vscode/
 .cursor/
 .codebuddy/
-.playwright-cli/           # 浏览器调试（预览 web/ 前端）留下的快照与日志
+# 浏览器调试（预览 web/ 前端）留下的快照与日志
+.playwright-cli/
 *.code-workspace
