@@ -1,11 +1,11 @@
 /* ============================================================
- * PFC 前端逻辑：Alpine 状态 + uPlot 图表 + 与 MATLAB(uihtml) 的桥接
+ * PCD 前端逻辑：Alpine 状态 + uPlot 图表 + 与 MATLAB(uihtml) 的桥接
  *
  * 两种运行方式：
  *   1) 在 MATLAB 里（uihtml 宿主）  -> MATLAB 调用 setup()，双向通信
  *   2) 直接在浏览器打开（离线预览） -> 无 bridge，自动跑演示数据
  * 协议：
- *   MATLAB -> JS : htmlComponent 事件 'pfc'（sendEventToHTMLSource）；启动时也可走 Data
+ *   MATLAB -> JS : htmlComponent 事件 'pcd'（sendEventToHTMLSource）；启动时也可走 Data
  *   JS -> MATLAB : sendEventToMATLAB('action',{name}) / ('params',{...})
  * ============================================================ */
 (function () {
@@ -19,7 +19,7 @@
     lastData = d;
     if (!(bridge.onData && d)) { return; }
     try { bridge.onData(d); }
-    catch (e) { try { console.error('[PFC] fromMatlab', e); } catch (e2) {} }
+    catch (e) { try { console.error('[PCD] fromMatlab', e); } catch (e2) {} }
   }
 
   // MATLAB 在加载 HTML 后自动调用这个全局函数（约定名，不能改）
@@ -28,8 +28,8 @@
     htmlComponent.addEventListener('DataChanged', function () {
       deliver(htmlComponent.Data);
     });
-    // 采集过程用 sendEventToHTMLSource('pfc', …)，避免每帧写 Data 触发整页重载
-    htmlComponent.addEventListener('pfc', function (ev) {
+    // 采集过程用 sendEventToHTMLSource('pcd', …)，避免每帧写 Data 触发整页重载
+    htmlComponent.addEventListener('pcd', function (ev) {
       var d = ev && (ev.HTMLEventData !== undefined ? ev.HTMLEventData : ev.Data);
       deliver(d);
     });
@@ -49,10 +49,10 @@
     try { data = JSON.parse(JSON.stringify(payload)); }
     catch (e) { data = null; }
     if (bridge.comp) { bridge.comp.sendEventToMATLAB(name, data); }
-    else { console.log('[PFC demo] -> MATLAB:', name, data); }
+    else { console.log('[PCD demo] -> MATLAB:', name, data); }
   }
 
-  /* ---------------- 配色（与 pfc_ui_colors 对齐） ---------------- */
+  /* ---------------- 配色（与 pcd_ui_colors 对齐） ---------------- */
   var C = {
     axBg: '#111419', axFg: '#C7D1E0', grid: '#373E4B',
     line: '#78ADF2', ref: '#6B788C', text: '#E6EAEF', muted: '#8B95A5'
@@ -190,9 +190,9 @@
   };
 
   /* ---------------- 采样点 / 周期数软件上下限 ---------------- */
-  /* 必须与 src/core/pfc_param_limits.m、web/index.html 的 min/max 保持同一套数字。
+  /* 必须与 src/core/pcd_param_limits.m、web/index.html 的 min/max 保持同一套数字。
    * 上限 100000：100k WORD × 2 通道，40 MSa/s ≈ 2.5 ms 窗，USB 仍可接受（旧实验上限 50k 的 2 倍）。
-   * 周期数 10000：与 pfc_param_limits.n_cycle_max 一致。不要按假 40 MSa/s 窗再压到 3000。
+   * 周期数 10000：与 pcd_param_limits.n_cycle_max 一致。不要按假 40 MSa/s 窗再压到 3000。
    * 超限必须在输入时截断并写回 x-model，否则框里仍显示 400000 / 9990，MATLAB 却按上限跑，
    * 截图会骗人。低于下限只在失焦/回车时截（逐键输入 40000 时中间的 4、40、400 还不能截）。 */
   var NPTS_MIN = 4096, NPTS_MAX = 100000;
@@ -211,7 +211,7 @@
    * T_on = n_cycle / f0_Hz；PRI = 1 / PRF
    * 界面百分数：cav_pct = 100 * duty
    * n_cycle = (cav_pct/100) * f0_Hz / PRF
-   * 例：1.5 MHz、PRF 5 Hz、n_cycle 3000 → 1%。必须与 src/core/pfc_duty.m 同一套公式。 */
+   * 例：1.5 MHz、PRF 5 Hz、n_cycle 3000 → 1%。必须与 src/core/pcd_duty.m 同一套公式。 */
   function cavPctFromNcycle(n, freqMhz, prf) {
     if (typeof n !== 'number' || typeof freqMhz !== 'number' || typeof prf !== 'number') { return NaN; }
     if (!isFinite(n) || !isFinite(freqMhz) || !isFinite(prf) || freqMhz <= 0 || prf <= 0) { return NaN; }
@@ -250,7 +250,7 @@
   }
 
   /* ---------------- Alpine 组件 ---------------- */
-  window.pfcApp = function () {
+  window.pcdApp = function () {
     return {
       busy: false,
       paramsReady: false,  // MATLAB init 到达前不让点闭环，避免按 JS 缺省 2 开跑
@@ -270,7 +270,7 @@
         fftTx: '频谱  FFT  ·  CH1',
         fftPcd: '频谱  FFT  ·  CH2'
       },
-      // 字段名与 MATLAB 侧存档（pfc_gui_params）完全一致，两边共用一套词汇
+      // 字段名与 MATLAB 侧存档（pcd_gui_params）完全一致，两边共用一套词汇
       p: defaultParams(),
       charts: {},
       trend: { x: [], sc: [], ic: [], volt: [] },
@@ -613,7 +613,7 @@
       startDemo: function () {
         var self = this;
         this.p.studyID = 'P0001';
-        this.p.directory = 'C:\\Users\\lab\\PFC\\data';
+        this.p.directory = 'C:\\Users\\lab\\PCD\\data';
         var Fs = 40e6, f0 = 1.5, nCyc = 16;
         var N = Math.round(nCyc * Fs / (f0 * 1e6));   // ~16 周期，与 MATLAB TX 上屏窗一致
         function wave() {

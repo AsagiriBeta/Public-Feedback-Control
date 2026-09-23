@@ -6,5 +6,5 @@ if nargin >= 1 && ~isempty(visaAddr)
         warning('rigol:dho814:open', '忽略传入地址，使用 rigol_instr_config 中的单例连接。');
     end
 end
-dev = pfc_visa('scope');
+dev = pcd_visa('scope');
 end

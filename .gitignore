@@ -15,6 +15,8 @@ slprj/
 # build/ 全是可再生的临时产物：安装包走 GitHub Release 附件分发，不进仓库。
 # 发布清单 update.json 放在仓库根目录（目标机按 raw 链接取它）。
 build/
+PCD_Installer*.exe
+PFC_Installer*.exe
 
 # ── 实验数据 ─────────────────────────────────────────────────────────
 # .mat 体积大且含动物 ID；频谱/图片/表格导出同样不入库
@@ -25,6 +27,9 @@ data/
 *.jpg
 *.jpeg
 # 若某天需要给文档配图，在这里加一行例外，例如：!docs/*.png
+!resources/
+!resources/pcd_icon.png
+!resources/pcd.ico
 
 # ── 厂商手册 / 论文 PDF（版权，体积大）────────────────────────────────
 *.pdf
@@ -35,6 +40,7 @@ vendor-docs/
 # ── 本机配置（每台机器的仪器地址/更新源不同，不入库）─────────────────
 rigol_config.ini
 pfc_update.ini
+pcd_update.ini
 
 # ── 编辑器 / IDE ─────────────────────────────────────────────────────
 .vscode/

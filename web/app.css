@@ -1,4 +1,4 @@
-/* PFC 界面样式：与 MATLAB 侧 pfc_ui_colors 同一套配色（改颜色改这里 + pfc_ui_colors） */
+/* PCD 界面样式：与 MATLAB 侧 pcd_ui_colors 同一套配色（改颜色改这里 + pcd_ui_colors） */
 :root{
   --fig:#111419; --panel:#1A1E25; --border:#303741;
   --text:#E6EAEF; --muted:#8F99A8;

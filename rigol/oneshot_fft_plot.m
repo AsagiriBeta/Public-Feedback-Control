@@ -4,7 +4,7 @@ function oneshot_fft_plot()
 thisdir = fileparts(mfilename('fullpath'));
 if ~isdeployed
     % 本脚本在 rigol/ 下，其余代码在 src/ 等目录；按项目根加整棵路径，
-    % 否则间接用到的 pfc_root / pfc_spectrum 之类会找不到。
+    % 否则间接用到的 pcd_root / pcd_spectrum 之类会找不到。
     addpath(genpath(fileparts(thisdir)));
 end
 cfg = rigol_instr_config();
@@ -27,7 +27,7 @@ rigol_dg2052_output_set(fgen, true);
 [chPcd, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, npts, cfg.scope_pcd_channel);
 rigol_dg2052_output_set(fgen, false);
 
-[F, ~, db] = pfc_spectrum(chTx, realFs);
+[F, ~, db] = pcd_spectrum(chTx, realFs);
 f_mhz = F / 1e6;
 nf0 = f_mhz / freq_mhz;
 n_tail = min(numel(db), max(16, floor(numel(db)/10)));
@@ -56,7 +56,7 @@ assignin('base', 'total_PCD_data', chPcd(:).');
 assignin('base', 'oneshot_tx', chTx(:).');
 assignin('base', 'oneshot_fs', realFs);
 
-outdir = fullfile(pfc_root(), 'data');
+outdir = fullfile(pcd_root(), 'data');
 S = struct('chPcd', chPcd, 'chTx', chTx, 'realFs', realFs, 'timeIntervalNanoSeconds', dt_ns, ...
     'f_Hz', F, 'fft_dB', db, 'freq_MHz', freq_mhz, 'volt_mVpp', volt_mV, ...
     'npts', npts, 'PRF_Hz', prf_hz, 'BurstCount', n_cycle);
@@ -67,8 +67,8 @@ src = struct('freq_mhz', freq_mhz, 'volt_mVpp', volt_mV, 'volt_out_mVpp', volt_m
     'tx_scale_vdiv', 0.05, 'pcd_scale_vdiv', 0.05, ...
     'scope_tx_channel', info.scope_tx_channel, ...
     'scope_pcd_channel', info.scope_pcd_channel);
-S.params = pfc_save_params('oneshot', src);
-pfc_save_acquisition(outdir, 'oneshot_cli', S);
+S.params = pcd_save_params('oneshot', src);
+pcd_save_acquisition(outdir, 'oneshot_cli', S);
 fprintf('oneshot 完成：采样率 %.4g Hz，CH1 peak 应在 1.5 MHz。输出已关闭。\n', realFs);
 end
 
