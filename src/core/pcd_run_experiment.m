@@ -16,10 +16,19 @@ outdir = ui.outdir();
 pcd_abort = false;
 token = pcd_visa('token');
 
-scope = pcd_visa('scope');
-fgen = pcd_visa('fgen');
-
 mode = lower(char(mode));
+L = pcd_scope_labels();
+if L.manual && any(strcmp(mode, {'during', 'feedback'}))
+    error('pcd:awg:manual', ...
+        '手动信号源不做闭环。请在发生器上自己调电压，用「3 开环」只采集。');
+end
+scope = pcd_visa('scope');
+if L.manual
+    fgen = [];
+    ui.status('手动信号源：请先在发生器上设好频率、电压并打开输出。电脑只采示波器。');
+else
+    fgen = pcd_visa('fgen');
+end
 started_at = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
 % 开环 2/3 用「超声参数」电压。Max V 只限制闭环 4，不要拿来截断开环。
 if any(strcmp(mode, {'during', 'feedback'}))
@@ -36,7 +45,8 @@ end
 % 触发电平必须低于实际 CH1 峰值（约 Vpp/2）。
 vpp_v = max(v_first, 1) / 1000;
 trig = trig_from_mVpp(v_first);
-info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle');
+burst_s = p.n_cycle / (p.freq_mhz * 1e6);
+info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle', burst_s);
 % 循环前初值只给第一发（prime）用：按发生器 Vpp 估 CH1，故意偏宽以免 prime 就贴轨。
 % 有效帧的量程由 set_ranges 的 K_DIV=1.0（4×余量）按实测峰值更新；prime 帧不入库。
 scTx  = max(0.001, vpp_v / 1.4);
@@ -89,9 +99,10 @@ sc_lo = NaN;
 try
     if any(strcmp(mode, {'during', 'feedback'}))
         prefix = ['Sonication_' sanitize_id(p.studyID)];
-        ui.status(sprintf('4 闭环  目标 %.1f dB', p.target_db));
-        fprintf('4 闭环  target_db=%.4g  ctrl=%s\n', p.target_db, metric);
-        base_n = max(4, round(5 * p.prf_hz));
+        ui.status(sprintf('4 闭环  目标 %.1f dB  IC 上限 %.1f dB', p.target_db, p.ic_limit_db));
+        fprintf('4 闭环  target_db=%.4g  IC上限 %.4g dB  ctrl=%s\n', p.target_db, p.ic_limit_db, metric);
+        % USB 大约 1 秒一帧。按 5×PRF 会先打半分钟假超声，小鼠总共只有两三分钟。
+        base_n = 8;
         % 假超声电压界面可调（base_mVpp）。文献 18 mVpp 是他们探头的 0.2 MPa。
         t_us = start_burst(fgen, p, base_v);
         cd_push();
@@ -274,6 +285,7 @@ result = save_now();
         src.realFs = info.realFs;
         src.n_expect = p.n_expect;
         src.target_db = p.target_db;
+        src.ic_limit_db = p.ic_limit_db;
         src.n_dummy = n_dummy;
         src.sc0 = sc0;
         src.ic0 = ic0;
@@ -349,14 +361,16 @@ result = save_now();
                         writeline(scope, sprintf(':TRIGger:EDGE:LEVel %.8g', trig));
                     catch
                     end
-                    wait_note = sprintf('CH1 未触发，电平已降到 %.2f mV', trig * 1e3);
+                    wait_note = sprintf('%s 未触发，电平已降到 %.2f mV', ...
+                        pcd_scope_labels().txTag, trig * 1e3);
                 else
                     acq_mode = 'live';
                     try
                         writeline(scope, ':TRIGger:SWEep AUTO');
                     catch
                     end
-                    wait_note = 'CH1 仍弱，已改定时采屏（不再空等边沿）';
+                    wait_note = sprintf('%s 仍弱，已改定时采屏（不再空等边沿）', ...
+                        pcd_scope_labels().txTag);
                 end
                 ui.status(sprintf('%s  %s  墙钟剩余 %.0f s', label, wait_note, remain_us()));
                 continue;
@@ -418,8 +432,8 @@ result = save_now();
             datamat(k, :) = rowP; %#ok<AGROW>
             txmat(k, :) = rowT; %#ok<AGROW>
             % 闭环也每发刷新时域+FFT。以前每 5 发且 CH1 不算谱，界面会冻在假超声最后一屏。
-            ui.waveform(txmat(k, :), info.realFs, p.freq_mhz, 'CH1 回读 TX', struct('ch', 'tx', 'fft', true));
-            ui.waveform(datamat(k, :), info.realFs, p.freq_mhz, 'CH2 PCD', struct('ch', 'pcd', 'fft', true));
+            ui.waveform(txmat(k, :), info.realFs, p.freq_mhz, '回读', struct('ch', 'tx', 'fft', true));
+            ui.waveform(datamat(k, :), info.realFs, p.freq_mhz, 'PCD', struct('ch', 'pcd', 'fft', true));
             [F, Y, db] = pcd_spectrum(datamat(k, :), info.realFs);
             [sc, ic, ~, ~, M] = pcd_band_energy(Y, F, p.freq_mhz * 1e6, cfg.harmonic_bandwidth_hz, p.sc_harm);
             pk = M.sc_ctrl;
@@ -464,29 +478,42 @@ result = save_now();
             q2 = pcd_2f_quality(F, db, p.freq_mhz);
             ok1 = (isfinite(ch1pk) && abs(ch1pk - p.freq_mhz) < 0.25 && pp1 >= 0.2 * volt) ...
                 || (do_fb && ~isfinite(ch1pk) && pp1 >= 0.2 * volt);
+            tags = pcd_scope_labels();
             if ok1
                 if isfinite(ch1pk)
-                    txmsg = sprintf('CH1 %.1f mVpp @ %.3f MHz OK', pp1, ch1pk);
+                    txmsg = sprintf('%s %.1f mVpp @ %.3f MHz OK', tags.txTag, pp1, ch1pk);
                 else
-                    txmsg = sprintf('CH1 %.1f mVpp', pp1);
+                    txmsg = sprintf('%s %.1f mVpp', tags.txTag, pp1);
                 end
             else
-                txmsg = sprintf('CH1 %.2f mVpp @ %s 【回读过弱/不是 %.2f MHz，先查 CH1 接线】', ...
-                    pp1, num2str(ch1pk, '%.3f'), p.freq_mhz);
+                txmsg = sprintf('%s %.2f mVpp @ %s 【回读过弱/不是 %.2f MHz，先查 %s 接线】', ...
+                    tags.txTag, pp1, num2str(ch1pk, '%.3f'), p.freq_mhz, tags.txTag);
             end
             if ~ok1 && ~strcmp(q2.flag, 'noise')
-                cav = [q2.note '  （CH1 无驱动，2f 不可信）'];
+                cav = [q2.note '  （' tags.txTag ' 无驱动，2f 不可信）'];
             else
                 cav = q2.note;
+            end
+            ic_hot = false;
+            ic_db = NaN;
+            % 本发相对假超声。事件阈值默认 1 dB：
+            % Sun et al., BME Frontiers, 2022；Chien et al., Sci. Rep., 2022。
+            if do_fb && isfinite(ic0) && ic0 > 0 && isfinite(p.ic_limit_db) && ...
+                    k >= 1 && isfinite(ICrec(k)) && ICrec(k) > 0
+                ic_db = 10 * log10(ICrec(k) / ic0);
+                ic_hot = ic_db > p.ic_limit_db;
             end
             left = remain_us();
             cd_push();
             if isfinite(tgt)
-                live = sprintf('%s  #%d/%d  剩余 %.0fs  %s  CH2 %s  %.2f mVpp', ...
-                    label, k, tgt, left, txmsg, cav, pp2);
+                live = sprintf('%s  #%d/%d  剩余 %.0fs  %s  %s %s  %.2f mVpp', ...
+                    label, k, tgt, left, txmsg, tags.pcdTag, cav, pp2);
             else
-                live = sprintf('%s  #%d  剩余 %.0fs  %s  CH2 %s  %.2f mVpp', ...
-                    label, k, left, txmsg, cav, pp2);
+                live = sprintf('%s  #%d  剩余 %.0fs  %s  %s %s  %.2f mVpp', ...
+                    label, k, left, txmsg, tags.pcdTag, cav, pp2);
+            end
+            if ic_hot
+                live = sprintf('%s  IC %.1f dB 超上限 %.1f，本发降压', live, ic_db, p.ic_limit_db);
             end
             ui.status(live);
             if ~do_fb
@@ -500,8 +527,9 @@ result = save_now();
                 save_now(false);
             end
             if do_fb
-                % 图仍画本发原值。电压用近 5 发平均。
-                % 爬升：离黄带远约 +35 mV；本发已接近目标则按单发收步（1–6 mV）。
+                % 图仍画本发原值。爬升用近 5 发平均；维持用近 7 发中位数。
+                % 爬升：离目标 ≥1.8 dB 时 +80 mV/帧，接近黄带再收到 10 mV、3 mV。
+                % IC 超上限时本发只降不升。SC 对加电压不再抬头就结束爬升。
                 ctrl_f = ctrl;
                 i1 = max(n0 + 1, k - 4);
                 if use_sum
@@ -521,9 +549,18 @@ result = save_now();
                 if isfinite(sc_tgt) && sc_tgt > 0 && isfinite(ctrl) && ctrl > 0
                     err_raw = 10 * log10(ctrl / sc_tgt);
                 end
-                if ramping
+                if ic_hot
+                    % Patel, Schoen, Arvanitis, IEEE TBME, 2019：宽带作 safety switch。
+                    % 超阈值的这一发施加最大负步（与爬升最大步同为 80 mV），
+                    % SC 控制器本发不再加减。下一发若 IC 回到上限以下，SC 继续。
+                    % 原文 PAM 阈值约是基线以上 1%。单通道 PCD 的 1% 落在噪声里，
+                    % 所以判定用 Sun / Chien 的 IC 事件：比假超声高过 ic_limit_db（默认 1 dB）。
+                    n_high = 0;
+                    n_low = 0;
+                    volt = max(1, volt - 80);
+                elseif ramping
                     % 快到目标：用本发与平均里更接近目标的那个算步距（平均滞后会让
-                    % 单发已到 2 dB 仍 +25 mV）。本发一旦进入黄带就停大步。
+                    % 单发已到 2 dB 仍大步加）。本发一旦进入黄带就停大步。
                     err_up = err_db;
                     if isfinite(err_raw)
                         if ~(isfinite(err_up))
@@ -534,7 +571,22 @@ result = save_now();
                     end
                     raw_in = isfinite(sc_lo) && isfinite(ctrl) && ctrl >= sc_lo;
                     mean_in = isfinite(sc_lo) && isfinite(ctrl_f) && ctrl_f >= sc_lo;
-                    if k > n0 + 1 && (raw_in || mean_in)
+                    flat = false;
+                    if k >= n0 + 8 && isfinite(sc0) && sc0 > 0
+                        if use_sum
+                            aSc = SCrec(k-7:k-4);
+                            bSc = SCrec(k-3:k);
+                        else
+                            aSc = PKrec(k-7:k-4);
+                            bSc = PKrec(k-3:k);
+                        end
+                        dA = median(10 * log10(max(aSc, realmin) / sc0), 'omitnan');
+                        dB = median(10 * log10(max(bSc, realmin) / sc0), 'omitnan');
+                        if isfinite(dA) && isfinite(dB) && (Vrec(k) - Vrec(k-7)) >= 60 && (dB - dA) < 0.3
+                            flat = true;
+                        end
+                    end
+                    if k > n0 + 1 && (raw_in || mean_in || flat)
                         ramping = false;
                         n_high = 0;
                         n_low = 0;
@@ -542,27 +594,48 @@ result = save_now();
                         volt = min(max_mVpp, volt + adapt_vstep_mV(err_up, true, true));
                     end
                 end
-                if ~ramping
-                    % 维持：偏高（5 dB 平台）要比较快往下砍；偏低只小步加，禁止再开 40 mV 爬升
-                    % （210004 在 130 s 掉到 1 dB 后又 +40 mV 打回 4.5）。
-                    if isfinite(err_db)
-                        dead_hi = 0.20;
-                        dead_lo = 0.18;
-                        if err_db > dead_hi
+                if ~ramping && ~ic_hot
+                    % 维持：黄带（目标 ±0.4 dB）内不动。近 7 发中位数，连续 5 帧
+                    % 出带才 ±1 mV。单发从 1 dB 跳到 4 dB 不带动电压。
+                    % 近 8 发电压已升 ≥20 mV 而 SC 中位数没抬 0.3 dB，就停止往上加。
+                    j1 = max(n0 + 1, k - 6);
+                    if use_sum
+                        seg = SCrec(j1:k);
+                    else
+                        seg = PKrec(j1:k);
+                    end
+                    seg = seg(isfinite(seg) & seg > 0);
+                    err_hold = NaN;
+                    if numel(seg) >= 3 && isfinite(sc_tgt) && sc_tgt > 0
+                        err_hold = 10 * log10(median(seg) / sc_tgt);
+                    end
+                    if isfinite(err_hold)
+                        if err_hold > 0.4
                             n_high = n_high + 1;
                             n_low = 0;
-                            need_hi = 2;
-                            if err_db > 0.80
-                                need_hi = 1;
+                            if n_high >= 5
+                                volt = volt - 1;
                             end
-                            if n_high >= need_hi
-                                volt = volt - adapt_vstep_mV(err_db, false, false);
-                            end
-                        elseif err_db < -dead_lo
+                        elseif err_hold < -0.4
                             n_low = n_low + 1;
                             n_high = 0;
-                            if n_low >= 2
-                                volt = volt + adapt_vstep_mV(err_db, true, false);
+                            stalled = false;
+                            if k >= n0 + 8 && isfinite(sc0) && sc0 > 0
+                                if use_sum
+                                    aSc = SCrec(k-7:k-4);
+                                    bSc = SCrec(k-3:k);
+                                else
+                                    aSc = PKrec(k-7:k-4);
+                                    bSc = PKrec(k-3:k);
+                                end
+                                dA = median(10 * log10(max(aSc, realmin) / sc0), 'omitnan');
+                                dB = median(10 * log10(max(bSc, realmin) / sc0), 'omitnan');
+                                if isfinite(dA) && isfinite(dB) && (Vrec(k) - Vrec(k-7)) >= 20 && (dB - dA) < 0.3
+                                    stalled = true;
+                                end
+                            end
+                            if n_low >= 5 && ~stalled
+                                volt = volt + 1;
                             end
                         else
                             n_high = 0;
@@ -644,11 +717,11 @@ result = save_now();
         end
         fft_on = ~skip_tx_fft;
         if ~isempty(yTx)
-            ui.waveform(yTx, fs, p.freq_mhz, 'CH1 回读 TX', ...
+            ui.waveform(yTx, fs, p.freq_mhz, '回读', ...
                 struct('ch', 'tx', 'fft', fft_on));
         end
         if ~isempty(yPcd)
-            ui.waveform(yPcd, fs, p.freq_mhz, 'CH2 PCD', ...
+            ui.waveform(yPcd, fs, p.freq_mhz, 'PCD', ...
                 struct('ch', 'pcd', 'fft', true));
         end
     end
@@ -657,6 +730,12 @@ end
 function t0 = start_burst(fgen, p, volt)
 %START_BURST 下发猝发并开射频。返回墙钟 tic：倒计时从 OUTPUT ON 这一刻起
 % （假超声也是超声）。pause 只为等第一发进示波器，不计入「还没开始」。
+% 手动信号源已经在面板上打开：这里不下发任何指令。
+if pcd_scope_labels().manual
+    t0 = tic;
+    pause(0.2);
+    return;
+end
 cfg = rigol_instr_config();
 rigol_dg2052_apply_burst(fgen, cfg.awg_channel, p.freq_mhz, volt, 0, p.n_cycle, p.period_s);
 rigol_dg2052_output_set(fgen, true);
@@ -714,7 +793,7 @@ burst_s = p.n_cycle / (p.freq_mhz * 1e6);
 env = abs(chTx);
 pk = max(env);
 if ~(pk > 1e-5)
-    fprintf('注意：CH1 里找不到猝发（回读幅度过小），无法校验采集窗对齐。\n');
+    fprintf('注意：%s 里找不到猝发（回读幅度过小），无法校验采集窗对齐。\n', pcd_scope_labels().txTag);
     return;
 end
 start_s = (find(env > 0.25 * pk, 1, 'first') - 1) / fs;
@@ -778,41 +857,42 @@ if nargin < 3
     is_ramp = true;
 end
 if ~(isfinite(err_db))
-    mag = 35;
+    if is_ramp && want_up
+        mag = 80;
+    else
+        mag = 4;
+    end
     return
 end
 a = abs(err_db);
 if is_ramp && want_up
-    if a >= 2.5
-        mag = 35;
-    elseif a >= 1.5
-        mag = 15;
-    elseif a >= 0.8
-        mag = 6;
-    elseif a >= 0.4
-        mag = 3;
+    % 小鼠只有两三分钟，USB 约 1 帧/秒。离目标远时大步，进黄带前收住。
+    if a >= 1.8
+        mag = 80;
+    elseif a >= 1.0
+        mag = 40;
+    elseif a >= 0.5
+        mag = 10;
     else
-        mag = 1;
+        mag = 3;
     end
     return
 end
 if ~want_up
-    if a >= 2
-        mag = 25;
-    elseif a >= 1
-        mag = 12;
-    elseif a >= 0.4
-        mag = 6;
+    if a >= 1.5
+        mag = 8;
+    elseif a >= 0.6
+        mag = 4;
     else
         mag = 2;
     end
     return
 end
-if a >= 1
-    mag = 8;
-elseif a >= 0.4
+if a >= 0.8
     mag = 4;
-else
+elseif a >= 0.4
     mag = 2;
+else
+    mag = 1;
 end
 end

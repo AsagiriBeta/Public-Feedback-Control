@@ -273,15 +273,15 @@ function ttl = fft_title_for(ch, f0, f_pk, db_pk, F, db)
 % CH1 报全局峰（驱动在不在 1.5 MHz）；CH2 报 2f 而不是 4.18 全局峰。
 if strcmp(ch, 'pcd') && nargin >= 6 && ~isempty(F)
     q = pcd_2f_quality(F, db, f0);
-    ttl = sprintf('频谱  FFT  ·  CH2  %s', q.note);
+    ttl = sprintf('频谱  FFT  ·  %s  %s', pcd_scope_labels().pcdTag, q.note);
     return;
 end
 if isfinite(f_pk) && isfinite(db_pk)
-    ttl = sprintf('频谱  FFT  ·  CH1  峰 %.3f MHz  %.0f dB', f_pk, db_pk);
+    ttl = sprintf('频谱  FFT  ·  %s  峰 %.3f MHz  %.0f dB', pcd_scope_labels().txTag, f_pk, db_pk);
     if isfinite(f0) && abs(f_pk - f0) > 0.25
         ttl = [ttl '  【≠f0，回读不是驱动】'];
     end
 else
-    ttl = '频谱  FFT  ·  CH1  无有效峰';
+    ttl = ['频谱  FFT  ·  ' pcd_scope_labels().txTag '  无有效峰'];
 end
 end

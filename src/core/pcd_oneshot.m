@@ -28,15 +28,27 @@ Fs = 40e6;
 started_at = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
 trig = max(5e-4, 0.25 * (volt / 1000));
 
-ui.status('采集中 Acquiring…');
+L = pcd_scope_labels();
+if L.manual
+    ui.status('手动信号源：请确认发生器已输出，电脑只采一帧。');
+else
+    ui.status('采集中 Acquiring…');
+end
 
 scope = rigol_dho814_open();
-info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel, trig);
-fgen_excute_UTSW(freq, volt, 0, cycle, 1 / PRF);
+burst_s = cycle / (freq * 1e6);
+info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel, trig, 'SINGle', burst_s);
+if ~L.manual
+    fgen_excute_UTSW(freq, volt, 0, cycle, 1 / PRF);
+end
 try
-    rigol_dg2052_output_set(fgen, true);
+    if ~L.manual
+        rigol_dg2052_output_set(fgen, true);
+    end
     [chA, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, depth, cfg.scope_pcd_channel);
-    rigol_dg2052_output_set(fgen, false);
+    if ~L.manual
+        rigol_dg2052_output_set(fgen, false);
+    end
     % 采集失败时返回的是空数组。不拦住的话后面照样算 FFT、写目录、还提示
     % 「已保存」—— 看着像成功，实际存进去是一片空数据。
     if ~isfinite(realFs) || realFs <= 0
@@ -45,17 +57,19 @@ try
     if isempty(chTx) || numel(chTx) < 256 || max(abs(chTx)) <= 5e-5
         error('PCD:oneshot:frame', ...
             ['未采到有效波形（触发超时或幅度过小），本次不保存。\n' ...
-             '请确认：CH1 已接信号源回读、触发已产生、射频输出已打开。']);
+             '请确认：%s 已接信号源回读、触发已产生、射频输出已打开。'], L.txTag);
     end
 catch err
-    try, rigol_dg2052_output_set(fgen, false); catch, end
+    if ~L.manual
+        try, rigol_dg2052_output_set(fgen, false); catch, end
+    end
     rethrow(err);
 end
 
 % CH1 / CH2 都上时域+频谱；前端分槽显示，不再共用一张 FFT。
-ui.waveform(chTx, realFs, freq, 'CH1 回读 TX', struct('ch', 'tx', 'fft', true));
+ui.waveform(chTx, realFs, freq, '回读', struct('ch', 'tx', 'fft', true));
 if ~isempty(chA)
-    ui.waveform(chA, realFs, freq, 'CH2 PCD', struct('ch', 'pcd', 'fft', true));
+    ui.waveform(chA, realFs, freq, 'PCD', struct('ch', 'pcd', 'fft', true));
 end
 [F, Y, db, NFFT] = pcd_spectrum(chTx, realFs);
 

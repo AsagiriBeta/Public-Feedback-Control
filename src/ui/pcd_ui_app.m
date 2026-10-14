@@ -54,7 +54,7 @@ set(fig, 'CloseRequestFcn', @(s, ~) pcd_ui_close(s));
 % 页面未就绪时 sendEventToHTMLSource 会丢；Data 会由 JS setup() 补读一次。
 % 这里故意不 drawnow，避免 CEF 还没跑 setup 就刷一遍空页。
 try
-    h.Data = struct('cmd', 'init', 'params', S);
+    h.Data = struct('cmd', 'init', 'params', S, 'instr', instr_payload());
 catch
 end
 end
@@ -115,9 +115,68 @@ switch name
         % 若先 merge 会把上次 prefs 里的 3 盖成 2，界面闪 2、实验却按错的数跑。
         S = getappdata(fig, 'pcd_params');
         if isstruct(S)
-            pcd_ui_push(fig, struct('cmd', 'init', 'params', S));
+            pcd_ui_push(fig, struct('cmd', 'init', 'params', S, 'instr', instr_payload()));
         end
+
+    case 'instr'
+        save_instr(fig, data);
+    end
 end
+
+function save_instr(fig, D)
+%SAVE_INSTR 主界面改信号源方式或示波器通道：写入 rigol_config.ini，并回推标题。
+cfg = rigol_instr_config();
+mode = 'computer';
+if isstruct(D) && isfield(D, 'awg_mode') && strcmpi(strtrim(char(string(D.awg_mode))), 'manual')
+    mode = 'manual';
+end
+tx = num_field(D, 'tx', cfg.scope_tx_channel);
+pcd = num_field(D, 'pcd', cfg.scope_pcd_channel);
+tx = min(4, max(1, round(tx)));
+pcd = min(4, max(1, round(pcd)));
+if tx == pcd
+    pcd_ui_push(fig, struct('cmd', 'status', 'text', '回读通道和 PCD 通道不能相同。'));
+    pcd_ui_push(fig, struct('cmd', 'instr', 'instr', instr_payload()));
+    return;
+end
+cfg.awg_mode = mode;
+cfg.scope_tx_channel = tx;
+cfg.scope_pcd_channel = pcd;
+cfg.scope_channel = pcd;
+try
+    rigol_instr_config('save', cfg);
+catch err
+    pcd_ui_push(fig, struct('cmd', 'status', 'text', err.message));
+    return;
+end
+pcd_ui_push(fig, struct('cmd', 'instr', 'instr', instr_payload()));
+if strcmp(mode, 'manual')
+    pcd_ui_push(fig, struct('cmd', 'status', 'text', ...
+        '手动信号源：电脑不连接发生器，也不做闭环。频率和电压请在发生器上设置。'));
+end
+end
+
+function n = num_field(D, key, fallback)
+n = fallback;
+if ~isstruct(D) || ~isfield(D, key)
+    return;
+end
+v = D.(key);
+if iscell(v) && isscalar(v)
+    v = v{1};
+end
+if ischar(v) || isstring(v)
+    v = str2double(v);
+end
+if isnumeric(v) && isscalar(v) && isfinite(v)
+    n = double(v);
+end
+end
+
+function I = instr_payload()
+L = pcd_scope_labels();
+I = struct('awg_mode', L.awg_mode, 'tx', L.tx, 'pcd', L.pcd, ...
+    'txTime', L.txTime, 'pcdTime', L.pcdTime, 'txFft', L.txFft, 'pcdFft', L.pcdFft);
 end
 
 function S = apply_params(fig, D, live)
@@ -181,13 +240,18 @@ ui = pcd_ui_html(fig);
 
 % 不需要独占仪器的动作，先处理掉
 switch act
-    case 'stop'
+        case 'stop'
         % STOP 任何时候都要能按：不抢锁，直接停。不弹窗。
         global pcd_abort %#ok<GVMIS>
         pcd_abort = true;
         pcd_visa('rf_off');
         pcd_ui_push(fig, struct('cmd', 'countdown', 'on', false));
-        pcd_ui_push(fig, struct('cmd', 'status', 'text', '正在停止…'));
+        if pcd_scope_labels().manual
+            pcd_ui_push(fig, struct('cmd', 'status', 'text', ...
+                '已停止采集。手动信号源的输出请在发生器上关闭。'));
+        else
+            pcd_ui_push(fig, struct('cmd', 'status', 'text', '正在停止…'));
+        end
         return;
     case 'browse'
         act_browse(fig);
@@ -196,12 +260,27 @@ switch act
         if pcd_visa('is_busy')
             pcd_ui_push(fig, struct('cmd', 'status', 'text', '采集进行中，请先 STOP FUS。'));
         else
+            % 仪器窗口开着时，忽略主窗口的关闭请求。模态对话框的「确定」
+            % 有时会误触发主窗口 CloseRequestFcn，看起来像点一下就闪退。
+            oldCr = fig.CloseRequestFcn;
+            fig.CloseRequestFcn = @(~, ~) drawnow;
+            dialogDone = onCleanup(@() restore_close(fig, oldCr)); %#ok<NASGU>
             pcd_instr_dialog();
+            clear dialogDone
+            if isvalid(fig)
+                pcd_ui_push(fig, struct('cmd', 'instr', 'instr', instr_payload()));
+            end
         end
         return;
     case 'update'
         pcd_update_flow(fig);
         return;
+end
+
+if strcmp(act, 'feedback') && pcd_scope_labels().manual
+    pcd_ui_push(fig, struct('cmd', 'status', 'text', ...
+        '手动信号源不做闭环。请在发生器上自己调电压，用「3 开环」只采集。'));
+    return;
 end
 
 % 以下动作要独占仪器：先抢运行锁，锁住前端按钮，结束（含出错）自动解锁。
@@ -259,9 +338,17 @@ catch err
     if ~is_stop_noise(err)
         pcd_ui_push(fig, struct('cmd', 'status', 'text', err.message));
         if isvalid(fig)
-            errordlg(err.message, 'PCD 运行出错');
+            % errordlg 的「确定」会把当前窗口当成自己的父窗口关掉，主程序就闪退。
+            msg = regexprep(char(string(err.message)), '<[^>]+>', '');
+            uialert(fig, msg, 'PCD 运行出错', 'Icon', 'error', 'Modal', true);
         end
     end
+end
+end
+
+function restore_close(fig, oldCr)
+if ~isempty(fig) && isvalid(fig)
+    fig.CloseRequestFcn = oldCr;
 end
 end
 

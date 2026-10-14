@@ -29,6 +29,9 @@ p.npts    = max(L.npts_min, round(opt(S, 'npts', L.npts_default)));
 p.npts    = min(p.npts, L.npts_max);
 % 目标 dB 是用户每次填的数；缺省才是 2，绝不把 4 改回 2。
 p.target_db = opt(S, 'target_db', 2);
+% IC 事件：相对假超声基线的 dB。默认 1 dB（Sun 2022；Chien 2022）。
+% 超过后的动作在 pcd_run_experiment：本发改走最大负步，不再为 SC 加电压。
+p.ic_limit_db = opt(S, 'ic_limit_db', 1);
 p.max_mVpp  = opt(S, 'max_mVpp', 120);
 p.base_mVpp = opt(S, 'base_mVpp', 100);
 p.vstep_mVpp = opt(S, 'vstep_mVpp', 5);

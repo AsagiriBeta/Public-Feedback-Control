@@ -6,7 +6,7 @@
  *   2) 直接在浏览器打开（离线预览） -> 无 bridge，自动跑演示数据
  * 协议：
  *   MATLAB -> JS : htmlComponent 事件 'pcd'（sendEventToHTMLSource）；启动时也可走 Data
- *   JS -> MATLAB : sendEventToMATLAB('action',{name}) / ('params',{...})
+   *   JS -> MATLAB : sendEventToMATLAB('action'|'params'|'ready'|'instr', ...)
  * ============================================================ */
 (function () {
   'use strict';
@@ -239,7 +239,7 @@
       dbg_freq: 1.5, dbg_volt: 20,
       freq_mhz: 1.5, volt_mVpp: 50, amp_gain: 40, prf_hz: 2, n_cycle: 400,
       cav_pct: 100 * 400 * 2 / 1.5e6, duration_s: 120, npts: 40000,
-      target_db: 2, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 5,
+      target_db: 2, ic_limit_db: 1, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 5,
       ctrl_metric: '2f_window_sum', sc_harm: '2f'
     };
     // MATLAB 若在 Alpine 启动前已写入 Data，第一帧就用存档，避免框里先闪出厂 2 dB。
@@ -264,9 +264,14 @@
       _cdTotal: 0,
       tab: 'debug',          // 步骤页：debug / nomb / open / fb（不是波形/趋势）
       runTab: '',            // 正在跑的步骤；切去看别的页时那个页签仍带 run 标记
+      awgMode: 'computer',   // computer=DG2052；manual=面板手控，电脑不连、不闭环
+      chTx: 1,
+      chPcd: 2,
+      _chTx: 1,
+      _chPcd: 2,
       titles: {
-        tx: 'CH1 时域  ·  TX',
-        pcd: 'CH2 时域  ·  PCD',
+        tx: 'CH1 时域 · 回读',
+        pcd: 'CH2 时域 · PCD',
         fftTx: '频谱  FFT  ·  CH1',
         fftPcd: '频谱  FFT  ·  CH2'
       },
@@ -473,6 +478,53 @@
         var who = this.tab === 'fb' ? '上限 ' : '发生器 ';
         return who + v + ' mVpp ×' + g + ' → ' + t + ' Vpp';
       },
+      awgHint: function () {
+        if (this.awgMode === 'manual') {
+          return '频率、电压、输出都在发生器面板上操作。停止只停采集，输出要自己关。图上的 CH 跟下面选的通道一致。';
+        }
+        return 'DG2052 由电脑设置猝发和闭环电压。回读通道坏了就改成别的 CH，图题会跟着变。';
+      },
+      onInstr: function () {
+        var tx = Number(this.chTx), pcd = Number(this.chPcd);
+        if (!(tx >= 1 && tx <= 4)) { tx = this._chTx; }
+        if (!(pcd >= 1 && pcd <= 4)) { pcd = this._chPcd; }
+        if (tx === pcd) {
+          this.chTx = this._chTx;
+          this.chPcd = this._chPcd;
+          this.status = '回读通道和 PCD 通道不能相同。';
+          return;
+        }
+        this.chTx = tx;
+        this.chPcd = pcd;
+        this._chTx = tx;
+        this._chPcd = pcd;
+        this.paintTitles();
+        toMatlab('instr', {
+          awg_mode: this.awgMode === 'manual' ? 'manual' : 'computer',
+          tx: tx,
+          pcd: pcd
+        });
+      },
+      applyInstr: function (I) {
+        if (!I || typeof I !== 'object') { return; }
+        if (I.awg_mode === 'manual' || I.awg_mode === 'computer') {
+          this.awgMode = I.awg_mode;
+        }
+        var tx = Number(I.tx), pcd = Number(I.pcd);
+        if (tx >= 1 && tx <= 4) { this.chTx = tx; this._chTx = tx; }
+        if (pcd >= 1 && pcd <= 4) { this.chPcd = pcd; this._chPcd = pcd; }
+        if (I.txTime) { this.titles.tx = I.txTime; }
+        if (I.pcdTime) { this.titles.pcd = I.pcdTime; }
+        if (I.txFft) { this.titles.fftTx = I.txFft; }
+        if (I.pcdFft) { this.titles.fftPcd = I.pcdFft; }
+      },
+      paintTitles: function () {
+        var tx = 'CH' + this.chTx, pcd = 'CH' + this.chPcd;
+        this.titles.tx = tx + ' 时域 · 回读';
+        this.titles.pcd = pcd + ' 时域 · PCD';
+        this.titles.fftTx = '频谱  FFT  ·  ' + tx;
+        this.titles.fftPcd = '频谱  FFT  ·  ' + pcd;
+      },
       scHarmHint: function () {
         var f = Number(this.p.freq_mhz), h = String(this.p.sc_harm || '2f');
         var n = 2;
@@ -491,12 +543,16 @@
         if (!d || !d.cmd) { return; }
         // 任意命令都可附带 tab，用来在实验开始时切到对应步骤页。
         if (d.tab) { this.setTab(d.tab); }
+        if (d.instr) { this.applyInstr(d.instr); }
         switch (d.cmd) {
           case 'init':
           case 'params':
             if (d.params) { Object.assign(this.p, d.params); }
             this.paramsReady = true;
             if (!this.p.ctrl_metric) { this.p.ctrl_metric = '2f_window_sum'; }
+            if (!(typeof this.p.ic_limit_db === 'number' && isFinite(this.p.ic_limit_db))) {
+              this.p.ic_limit_db = 1;
+            }
             if (!this.p.sc_harm) { this.p.sc_harm = '2f'; }
             if (!(typeof this.p.cav_pct === 'number' && isFinite(this.p.cav_pct))) {
               this.syncCavFromNcycle();
@@ -556,9 +612,9 @@
             var pp = (typeof d.pp_mV === 'number' && isFinite(d.pp_mV))
               ? ('  ' + (d.pp_mV >= 10 ? d.pp_mV.toFixed(1) : d.pp_mV.toFixed(2)) + ' mVpp')
               : '';
-            var title = slot === 'pcd'
-              ? ('CH2 时域  ·  ' + d.name + pp)
-              : ('CH1 时域  ·  ' + d.name + pp);
+            var tag = slot === 'pcd' ? ('CH' + this.chPcd) : ('CH' + this.chTx);
+            var nm = String(d.name).replace(/^CH\s*\d+\s*/i, '');
+            var title = tag + ' 时域  ·  ' + nm + pp;
             if (this.titles[slot] !== title) { this.titles[slot] = title; }
           }
         }
@@ -659,16 +715,16 @@
         }
         var w = wave(), s = spec('tx'), sp = spec('pcd'), pcd = pcdWave();
         this.setWave({
-          ch: 'tx', name: 'CH1 回读 TX',
+          ch: 'tx', name: '回读',
           dt_us: w.dt, y: w.y, f: s.f, db: s.db, f0: f0, f_max: 8,
-          fft_of: 'CH1 回读 TX',
+          fft_of: '回读',
           marks: [
             { f: 0.75, main: false }, { f: 1.5, main: false }, { f: 2.25, main: false },
             { f: 3.0, main: true }, { f: 3.75, main: false }, { f: 4.5, main: false }
           ]
         });
         this.setWave({
-          ch: 'pcd', name: 'CH2 PCD',
+          ch: 'pcd', name: 'PCD',
           dt_us: pcd.dt, y: pcd.y, f: sp.f, db: sp.db, f0: f0, f_max: 8,
           marks: [
             { f: 0.75, main: false }, { f: 1.5, main: false }, { f: 2.25, main: false },

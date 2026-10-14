@@ -78,6 +78,10 @@ if ~isfinite(P.n_expect) && isfinite(P.duration_s) && isfinite(P.prf_hz)
     P.n_expect = max(1, round(P.duration_s * P.prf_hz));
 end
 P.target_db = pickn(src, 'target_db', raw, 'target_db');
+P.ic_limit_db = pickn(src, 'ic_limit_db', raw, 'ic_limit_db');
+if ~isfinite(P.ic_limit_db)
+    P.ic_limit_db = 1;
+end
 P.n_dummy = pickn(src, 'n_dummy');
 P.sc0 = pickn(src, 'sc0');
 P.ic0 = pickn(src, 'ic0');

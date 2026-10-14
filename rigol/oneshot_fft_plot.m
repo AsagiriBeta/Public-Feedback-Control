@@ -17,7 +17,8 @@ npts = 40000;
 fs_target = 40e6;
 
 scope = rigol_dho814_open(cfg.scope_visa);
-info = rigol_dho814_setup(scope, fs_target, npts, cfg.scope_channel);
+info = rigol_dho814_setup(scope, fs_target, npts, cfg.scope_channel, 0.005, 'SINGle', ...
+    n_cycle / (freq_mhz * 1e6));
 fgen = visadev(cfg.awg_visa);
 fgen.Timeout = 15;
 cleanup = onCleanup(@() local_off(fgen, scope)); %#ok<NASGU>

@@ -34,13 +34,21 @@ started_at = datestr(now, 'yyyy-mm-ddTHH:MM:SS');
 
 trig = max(1e-3, 0.2 * (volt / 1000));
 scope = pcd_visa('scope');
-fgen = pcd_visa('fgen');
+L = pcd_scope_labels();
+if L.manual
+    fgen = [];
+    ui.status('手动信号源：调试只采示波器，频率和电压请在发生器上改。');
+else
+    fgen = pcd_visa('fgen');
+end
 info = rigol_dho814_setup(scope, Fs, npts, cfg.scope_pcd_channel, trig, 'AUTO');
 scTx = 0.05;    % 与 setup 里两个通道的初值一致，下面按实测峰值重定标
 scPcd = 0.05;
 [freq, volt] = pcd_debug_live('start', ui, freq, volt);
 
-rigol_dg2052_output_set(fgen, true);
+if ~L.manual
+    rigol_dg2052_output_set(fgen, true);
+end
 tWait = tic;
 while toc(tWait) < 0.3
     if ~pcd_visa('alive', token)
@@ -100,9 +108,10 @@ try
         datamat(pulse, :) = pcd_fitrow(chPcd, npts); %#ok<AGROW>
         txmat(pulse, :) = pcd_fitrow(chTx, npts); %#ok<AGROW>
         % 两路上时域+频谱：CH1 正弦截窗，CH2 整段底噪。峰位仍取 CH1（调试看驱动）。
-        [fpk, dpk] = ui.waveform(chTx, realFs, freq, 'CH1 回读 TX', struct('ch', 'tx', 'fft', true));
+        tags = pcd_scope_labels();
+        [fpk, dpk] = ui.waveform(chTx, realFs, freq, '回读', struct('ch', 'tx', 'fft', true));
         if ~isempty(chPcd)
-            ui.waveform(chPcd, realFs, freq, 'CH2 PCD', struct('ch', 'pcd', 'fft', true));
+            ui.waveform(chPcd, realFs, freq, 'PCD', struct('ch', 'pcd', 'fft', true));
         end
         peaks(pulse, :) = [fpk, dpk]; %#ok<AGROW>
         ok = isfinite(fpk) && abs(fpk - freq) < 0.25;
@@ -113,17 +122,17 @@ try
         if pp1 < 0.2 * volt
             ok = false;
         end
-        msg = sprintf('调试  设定 %.3g MHz  %.4g mVpp  CH1 %.2f mVpp @ %s  #%d  （STOP 结束）', ...
-            freq, volt, pp1, ...
+        msg = sprintf('调试  设定 %.3g MHz  %.4g mVpp  %s %.2f mVpp @ %s  #%d  （STOP 结束）', ...
+            freq, volt, tags.txTag, pp1, ...
             tern(ok && isfinite(fpk), sprintf('%.3f MHz OK', fpk), ...
             tern(isfinite(fpk), sprintf('%.3f MHz', fpk), '无峰')), pulse);
         if pp1 < 0.2 * volt
-            msg = [msg '  【CH1 回读过弱，检查接线/探头】']; %#ok<AGROW>
+            msg = [msg '  【' tags.txTag ' 回读过弱，检查接线/探头】']; %#ok<AGROW>
         end
         if ~isfinite(fpk)
             mx = 0;
             if ~isempty(chTx), mx = max(abs(chTx)); end
-            msg = sprintf('调试 CH1 无有效峰（时域 max=%.3g V，p-p=%.2f mV）  #%d', mx, pp1, pulse);
+            msg = sprintf('调试 %s 无有效峰（时域 max=%.3g V，p-p=%.2f mV）  #%d', tags.txTag, mx, pp1, pulse);
         end
         ui.status(msg);
         fprintf('%s\n', msg);
@@ -180,7 +189,7 @@ else
     result.median_peak_mhz = NaN;
 end
 ui.status(sprintf('已保存  %d 帧  %s', pulse, fp));
-fprintf('调试结束：%d 帧，CH1 谱峰中位 %.3f MHz\n%s\n', pulse, result.median_peak_mhz, fp);
+fprintf('调试结束：%d 帧，%s 谱峰中位 %.3f MHz\n%s\n', pulse, pcd_scope_labels().txTag, result.median_peak_mhz, fp);
 end
 
 function v = getf(s, name, def)

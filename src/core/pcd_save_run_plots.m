@@ -17,27 +17,28 @@ f_max = fft_cap(fs, f0);
 emi_col = [0.769 0.639 0.353];
 ch1_col = [0.10 0.35 0.75];
 ch2_col = [0.80 0.25 0.15];
+[txLab, pcdLab] = plot_ch_names(S);
 
 if ~isempty(tx)
-    try_plot(fullfile(rundir, 'fft_ch1.png'), @(fig) plot_fft_ch1(fig, tx(min(k, size(tx,1)), :), fs, f0, f_max, ch1_col, k));
+    try_plot(fullfile(rundir, 'fft_ch1.png'), @(fig) plot_fft_ch1(fig, tx(min(k, size(tx,1)), :), fs, f0, f_max, ch1_col, k, txLab));
     if np >= 8
-        try_plot(fullfile(rundir, 'fft_ch1_mean.png'), @(fig) plot_fft_mean(fig, tx, fs, f0, f_max, ch1_col, [], 'CH1 TX'));
+        try_plot(fullfile(rundir, 'fft_ch1_mean.png'), @(fig) plot_fft_mean(fig, tx, fs, f0, f_max, ch1_col, [], [txLab ' 回读']));
     end
 end
 if ~isempty(pcd)
-    try_plot(fullfile(rundir, 'fft_ch2.png'), @(fig) plot_fft_ch2(fig, pcd(min(k, size(pcd,1)), :), fs, f0, f_max, ch2_col, emi_col, k));
+    try_plot(fullfile(rundir, 'fft_ch2.png'), @(fig) plot_fft_ch2(fig, pcd(min(k, size(pcd,1)), :), fs, f0, f_max, ch2_col, emi_col, k, pcdLab));
     if np >= 8
-        try_plot(fullfile(rundir, 'fft_ch2_mean.png'), @(fig) plot_fft_mean(fig, pcd, fs, f0, f_max, ch2_col, emi_col, 'CH2 PCD'));
+        try_plot(fullfile(rundir, 'fft_ch2_mean.png'), @(fig) plot_fft_mean(fig, pcd, fs, f0, f_max, ch2_col, emi_col, [pcdLab ' PCD']));
     end
 end
-try_plot(fullfile(rundir, 'time_ch1_ch2.png'), @(fig) plot_time(fig, tx, pcd, fs, f0, k, ch1_col, ch2_col));
+try_plot(fullfile(rundir, 'time_ch1_ch2.png'), @(fig) plot_time(fig, tx, pcd, fs, f0, k, ch1_col, ch2_col, txLab, pcdLab));
 n_good = np;
 if isfield(S, 'n_good') && isnumeric(S.n_good) && isscalar(S.n_good) && isfinite(S.n_good)
     n_good = max(n_good, double(S.n_good));
 end
 if n_good > 1
     try_plot(fullfile(rundir, 'pulse_sc_ic.png'), @(fig) plot_pulse(fig, S, tx, pcd, fs, f0, emi_col, rundir));
-    % 主 Fig.6：3 MHz 窗求和蓝线 + 本 run target_db 黄带。覆盖 fig6_control.png。
+    % 逐点电压/SC/IC，不做 5 帧平均。pulse_sc_ic.png 才有平均线。
     try
         pcd_plot_fig6_literature(rundir);
     catch
@@ -141,7 +142,24 @@ ylabel(ax, 'dB  (20 log_{10} mean |FFT|)');
 title(ax, sprintf('%s  平均谱 n=%d  %s', who, np, q.note));
 end
 
-function plot_fft_ch1(fig, y, fs, f0, f_max, col, k)
+function [txLab, pcdLab] = plot_ch_names(S)
+txLab = 'CH1';
+pcdLab = 'CH2';
+if isfield(S, 'params') && isstruct(S.params)
+    P = S.params;
+    if isfield(P, 'scope_tx_channel') && isfinite(P.scope_tx_channel)
+        txLab = sprintf('CH%g', P.scope_tx_channel);
+    end
+    if isfield(P, 'scope_pcd_channel') && isfinite(P.scope_pcd_channel)
+        pcdLab = sprintf('CH%g', P.scope_pcd_channel);
+    end
+end
+end
+
+function plot_fft_ch1(fig, y, fs, f0, f_max, col, k, txLab)
+if nargin < 8 || isempty(txLab)
+    txLab = 'CH1';
+end
 [F, ~, db] = pcd_spectrum(y, fs);
 [f_pk, db_pk] = pcd_fft_peak_mhz(F, db, 0.3, 8);
 [fw, dbw] = clip_fft(F, db, f_max);
@@ -159,13 +177,16 @@ xlim(ax, [0 f_max]);
 xlabel(ax, 'Frequency (MHz)');
 ylabel(ax, 'dB  (20 log_{10} |FFT|)');
 if isfinite(f_pk)
-    title(ax, sprintf('CH1 TX FFT  pulse %d  峰 %.3f MHz  %.0f dB', k, f_pk, db_pk));
+    title(ax, sprintf('%s 回读 FFT  pulse %d  峰 %.3f MHz  %.0f dB', txLab, k, f_pk, db_pk));
 else
-    title(ax, sprintf('CH1 TX FFT  pulse %d  无有效峰', k));
+    title(ax, sprintf('%s 回读 FFT  pulse %d  无有效峰', txLab, k));
 end
 end
 
-function plot_fft_ch2(fig, y, fs, f0, f_max, col, emi_col, k)
+function plot_fft_ch2(fig, y, fs, f0, f_max, col, emi_col, k, pcdLab)
+if nargin < 9 || isempty(pcdLab)
+    pcdLab = 'CH2';
+end
 [F, ~, db] = pcd_spectrum(y, fs);
 q = pcd_2f_quality(F, db, f0);
 [fw, dbw] = clip_fft(F, db, f_max);
@@ -203,10 +224,12 @@ grid(ax, 'on');
 xlim(ax, [0 f_max]);
 xlabel(ax, 'Frequency (MHz)');
 ylabel(ax, 'dB  (20 log_{10} |FFT|)');
-title(ax, sprintf('CH2 PCD FFT  pulse %d  %s', k, q.note));
+title(ax, sprintf('%s PCD FFT  pulse %d  %s', pcdLab, k, q.note));
 end
 
-function plot_time(fig, tx, pcd, fs, f0, k, ch1_col, ch2_col)
+function plot_time(fig, tx, pcd, fs, f0, k, ch1_col, ch2_col, txLab, pcdLab)
+if nargin < 9 || isempty(txLab), txLab = 'CH1'; end
+if nargin < 10 || isempty(pcdLab), pcdLab = 'CH2'; end
 nsub = double(~isempty(tx)) + double(~isempty(pcd));
 if nsub < 1
     return;
@@ -219,9 +242,9 @@ if ~isempty(tx)
     ax = subplot(nsub, 1, ii, 'Parent', fig);
     plot(ax, tt, yw * 1e3, 'Color', ch1_col, 'LineWidth', 0.8);
     grid(ax, 'on');
-    ylabel(ax, 'CH1 (mV)');
+    ylabel(ax, [txLab ' (mV)']);
     pp = (max(y) - min(y)) * 1e3;
-    title(ax, sprintf('CH1 TX  pulse %d  p-p=%.2f mV', k, pp));
+    title(ax, sprintf('%s 回读  pulse %d  p-p=%.2f mV', txLab, k, pp));
     if isempty(pcd)
         xlabel(ax, 'Time (\mus)');
     end
@@ -233,10 +256,10 @@ if ~isempty(pcd)
     ax = subplot(nsub, 1, ii, 'Parent', fig);
     plot(ax, tt, yw * 1e3, 'Color', ch2_col, 'LineWidth', 0.6);
     grid(ax, 'on');
-    ylabel(ax, 'CH2 (mV)');
+    ylabel(ax, [pcdLab ' (mV)']);
     xlabel(ax, 'Time (\mus)');
     pp = (max(y) - min(y)) * 1e3;
-    title(ax, sprintf('CH2 PCD  pulse %d  p-p=%.2f mV', k, pp));
+    title(ax, sprintf('%s PCD  pulse %d  p-p=%.2f mV', pcdLab, k, pp));
 end
 end
 
@@ -244,7 +267,7 @@ function plot_pulse(fig, S, tx, pcd, fs, f0, emi_col, rundir) %#ok<INUSD>
 if nargin < 8
     rundir = '';
 end
-% 文献 Fig.6：电压 / 2f 窗求和 dB / IC dB。不画峰/底。横轴是采集墙钟。
+% 电压 / SC / IC。不画峰/底。横轴是采集墙钟。
 set(fig, 'Position', [50 50 1000 860]);
 volt = vec_field(S, 'Vrealtime');
 sc_sum = vec_field(S, 'RampSC');
@@ -282,15 +305,19 @@ if ~isempty(volt)
     grid(ax, 'on');
     ylabel(ax, 'Voltage (mVpp)');
     xlim(ax, [xL xR]);
-    title(ax, sprintf('Fig.6-style  n=%d  dummy=%d  target=%.1f\\pm0.4 dB  (SUM vs this-run yellow)', ...
-        np_axis, n_dummy, tgt_db));
+    if isfinite(tgt_db)
+        title(ax, sprintf('电压  n=%d  假超声 %d 帧  目标 %.1f \\pm 0.4 dB', ...
+            np_axis, n_dummy, tgt_db));
+    else
+        title(ax, sprintf('电压  n=%d  假超声 %d 帧', np_axis, n_dummy));
+    end
 end
 if n_dummy >= 1 && use_db && (~isempty(sc_sum) || ~isempty(sc)) && ~isempty(ic)
     ii = ii + 1;
     ax = subplot(n, 1, ii, 'Parent', fig);
     hold(ax, 'on');
     if ~isempty(sc_sum) && isfinite(sc0_sum) && sc0_sum > 0
-        % 蓝线 = Fig.6 度量。橙带 = 本 run HIS 目标 ±0.4 dB（不是写死 4）。不画峰/底。
+        % 蓝线 = 所选谐波窗求和。橙带 = 本 run 目标 ±0.4 dB。不画峰/底。
         sc_db = 10 * log10(max(sc_sum(:), realmin) / sc0_sum);
         xs = xx(1:numel(sc_db));
         if isfinite(tgt_db)
@@ -316,11 +343,11 @@ if n_dummy >= 1 && use_db && (~isempty(sc_sum) || ~isempty(sc)) && ~isempty(ic)
         hs = [];
         if ~isempty(h_dot)
             hs(end+1) = h_dot; %#ok<AGROW>
-            legs{end+1} = '2f\\pm20 kHz sum (Fig.6 blue)'; %#ok<AGROW>
+            legs{end+1} = '2f \pm20 kHz 窗求和'; %#ok<AGROW>
         end
         if ~isempty(h_avg)
             hs(end+1) = h_avg; %#ok<AGROW>
-            legs{end+1} = '5-frame mean of SUM'; %#ok<AGROW>
+            legs{end+1} = '5 帧平均'; %#ok<AGROW>
         end
         if ~isempty(hs)
             legend(ax, hs, legs, 'Location', 'best');

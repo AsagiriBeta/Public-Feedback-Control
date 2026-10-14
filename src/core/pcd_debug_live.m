@@ -60,6 +60,9 @@ end
 end
 
 function push_cw(freq, volt)
+if pcd_scope_labels().manual
+    return;
+end
 cfg = rigol_instr_config();
 dev = pcd_visa('fgen');
 rigol_dg2052_cw(dev, cfg.awg_channel, freq, volt);

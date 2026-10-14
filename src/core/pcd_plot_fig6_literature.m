@@ -18,12 +18,8 @@ if ~isfile(rawfile)
 end
 S = load(rawfile);
 [volt, sc, ic, n_dummy, tgt_db, f0, metric, harm_tag, sc_mhz] = lit_series(S, rundir);
-write_fig(fullfile(rundir, 'fig6_literature.png'), volt, sc, ic, n_dummy, tgt_db, sc_mhz, metric, S, harm_tag);
-copyfile(fullfile(rundir, 'fig6_literature.png'), fullfile(rundir, 'fig6_control.png'));
-old3f = fullfile(rundir, 'fig6_literature_3f.png');
-if isfile(old3f)
-    delete(old3f);
-end
+% 逐点，不做 5 帧平均。带平均的是 pulse_sc_ic.png。
+write_fig(fullfile(rundir, 'sc_ic.png'), volt, sc, ic, n_dummy, tgt_db, sc_mhz, metric, S, harm_tag);
 end
 
 function [volt, sc, ic, n_dummy, tgt_db, f0, metric, harm_tag, sc_mhz] = lit_series(S, rundir)
@@ -100,15 +96,9 @@ fig = figure('Visible', 'off', 'Color', 'w', 'IntegerHandle', 'off', ...
     'Position', [40 40 980 820]);
 cleaner = onCleanup(@() close_soft(fig)); %#ok<NASGU>
 
-if loop_sum
-    loop_txt = 'loop=window sum';
-else
-    loop_txt = 'loop=peak/floor (blue SUM not controlled)';
-end
 tl = tiledlayout(fig, 3, 1, 'TileSpacing', 'compact', 'Padding', 'compact');
-title(tl, sprintf(['Fig. 6  SC %s = %.2f MHz  dummy=%d  ', ...
-    'yellow = this run target %.1f \\pm 0.4 dB  %s'], ...
-    harm_tag, sc_mhz, n_dummy, tgt_db, loop_txt), 'FontSize', 11, 'FontWeight', 'bold');
+title(tl, sprintf('电压 / SC / IC    %s = %.2f MHz    假超声 %d 帧    目标 %.1f \\pm 0.4 dB', ...
+    harm_tag, sc_mhz, n_dummy, tgt_db), 'FontSize', 11, 'FontWeight', 'bold');
 
 ax1 = nexttile(tl);
 hold(ax1, 'on');
@@ -122,7 +112,7 @@ if ~isempty(volt)
     ylim(ax1, [0, max(volt(:)) * 1.12]);
 end
 shade_dummy_x(ax1, xx, n_dummy, tmode);
-title(ax1, 'Voltage');
+title(ax1, '电压');
 set(ax1, 'FontSize', 9, 'FontWeight', 'bold', 'Box', 'on');
 
 ax2 = nexttile(tl);
@@ -145,11 +135,11 @@ if ~isfinite(ylo), ylo = -2; end
 if ~isfinite(yhi), yhi = tgt_db + 2; end
 ylim(ax2, [ylo - 0.2, yhi + 0.3]);
 shade_dummy_x(ax2, xx, n_dummy, tmode);
-title(ax2, sprintf('Blue: %.2f MHz (%s) \\pm20 kHz sum |FFT|', sc_mhz, harm_tag));
+title(ax2, sprintf('SC  %.2f MHz (%s) \\pm20 kHz 窗求和', sc_mhz, harm_tag));
 if loop_sum
-    sum_leg = sprintf('window sum = loop  SC_0=%.4g', sc0);
+    sum_leg = sprintf('窗求和  SC_0=%.4g', sc0);
 else
-    sum_leg = sprintf('window sum (Fig.6 blue; NOT loop)  SC_0=%.4g', sc0);
+    sum_leg = sprintf('窗求和（未参与闭环）  SC_0=%.4g', sc0);
 end
 legend(ax2, h_sc, sum_leg, 'Location', 'best');
 set(ax2, 'FontSize', 9, 'FontWeight', 'bold', 'Box', 'on');
@@ -163,7 +153,7 @@ ylabel(ax3, 'IC (dB)');
 xlabel(ax3, xlab);
 xlim(ax3, [xL xR]);
 shade_dummy_x(ax3, xx, n_dummy, tmode);
-title(ax3, 'IC = 2f–2.5f mean / floor');
+title(ax3, 'IC  2f–2.5f / 底');
 legend(ax3, h_ic, sprintf('10 log_{10}(IC/IC_0),  IC_0=%.4g', ic0), ...
     'Location', 'best');
 set(ax3, 'FontSize', 9, 'FontWeight', 'bold', 'Box', 'on');
@@ -178,7 +168,7 @@ if isempty(khold)
     khold = n_dummy + 1;
 end
 ih = max(1, khold):min(np, numel(sc_db));
-fprintf(['Fig.6  %s=%.2f MHz  yellow=%.1f+/-0.4 dB  x=%s\n', ...
+fprintf(['SC/IC  %s=%.2f MHz  yellow=%.1f+/-0.4 dB  x=%s\n', ...
     '  sum 10log late med=%.2f mean=%.2f max=%.2f dB\n'], ...
     harm_tag, sc_mhz, tgt_db, tmode, ...
     median(sc_db(ih), 'omitnan'), mean(sc_db(ih), 'omitnan'), max(sc_db(ih)));

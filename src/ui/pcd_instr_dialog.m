@@ -6,7 +6,6 @@ function pcd_instr_dialog()
 C = pcd_ui_colors();
 
 if pcd_visa('is_busy')
-    warndlg('采集进行中，请先 STOP。', 'PCD');
     return;
 end
 
@@ -16,7 +15,7 @@ fn = ui_font();
 
 fig = uifigure('Name', '仪器设置 / Instruments', ...
     'Color', C.fig, 'Position', [100 80 760 560], ...
-    'Resize', 'on', 'WindowStyle', 'modal', 'Visible', 'off');
+    'Resize', 'on', 'WindowStyle', 'alwaysontop', 'Visible', 'off');
 fig.CloseRequestFcn = @(src, ~) delete(src);
 
 g = uigridlayout(fig, [8 1]);
@@ -201,11 +200,12 @@ uiwait(fig);
     function do_save()
         s1 = edit_str(scope_e);
         s2 = edit_str(awg_e);
-        if isempty(s1) || isempty(s2)
-            uialert(fig, '示波器与信号源的 VISA 地址都不能为空。请先扫描。', 'PCD', 'Icon', 'warning');
+        manual = isfield(cfg, 'awg_mode') && strcmpi(cfg.awg_mode, 'manual');
+        if isempty(s1) || (~manual && isempty(s2))
+            uialert(fig, '示波器地址不能为空。电脑控制 DG2052 时信号源地址也不能为空。', 'PCD', 'Icon', 'warning');
             return;
         end
-        if visa_same(s1, s2)
+        if ~isempty(s2) && visa_same(s1, s2)
             uialert(fig, '示波器与信号源是同一台仪器（地址写法可能不同），不能保存。', 'PCD', 'Icon', 'warning');
             return;
         end
@@ -217,7 +217,9 @@ uiwait(fig);
             return;
         end
         cfg.scope_visa = s1;
-        cfg.awg_visa = s2;
+        if ~isempty(s2)
+            cfg.awg_visa = s2;
+        end
         cfg.scope_tx_channel = tx;
         cfg.scope_pcd_channel = pcd;
         cfg.awg_channel = aw;

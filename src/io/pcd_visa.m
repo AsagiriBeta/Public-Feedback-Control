@@ -23,6 +23,11 @@ switch lower(cmd)
             rigol_instr_config().scope_visa);
         varargout{1} = pcd_visa_state.scope;
     case 'fgen'
+        if pcd_scope_labels().manual
+            error('pcd:awg:manual', ...
+                ['当前是手动信号源：电脑不连接发生器，也不改它的电压。\n' ...
+                 '请在发生器面板上设置，或把主界面的信号源改回「电脑控制 DG2052」。']);
+        end
         pcd_visa_state.fgen = reuse_visadev(pcd_visa_state.fgen, ...
             rigol_instr_config().awg_visa);
         fgen = pcd_visa_state.fgen;
@@ -174,6 +179,10 @@ end
 
 function rf_off_now()
 global pcd_visa_state fgen
+% 手动信号源不在电脑上，STOP 只停采集，不能也没有权利关掉面板上的输出。
+if pcd_scope_labels().manual
+    return;
+end
 try
     if is_open(pcd_visa_state.fgen)
         rigol_dg2052_output_set(pcd_visa_state.fgen, false);
