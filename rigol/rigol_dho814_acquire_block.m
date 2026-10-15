@@ -138,8 +138,8 @@ end
 end
 
 function tf = scope_abort()
-global pfc_abort %#ok<GVMIS>
-tf = ~isempty(pfc_abort) && logical(pfc_abort);
+global pcd_abort %#ok<GVMIS>
+tf = ~isempty(pcd_abort) && logical(pcd_abort);
 end
 
 function ok = pause_or_abort(dt)

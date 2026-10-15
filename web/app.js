@@ -1,12 +1,12 @@
 /* ============================================================
- * PFC 前端逻辑：Alpine 状态 + uPlot 图表 + 与 MATLAB(uihtml) 的桥接
+ * PCD 前端逻辑：Alpine 状态 + uPlot 图表 + 与 MATLAB(uihtml) 的桥接
  *
  * 两种运行方式：
  *   1) 在 MATLAB 里（uihtml 宿主）  -> MATLAB 调用 setup()，双向通信
  *   2) 直接在浏览器打开（离线预览） -> 无 bridge，自动跑演示数据
  * 协议：
- *   MATLAB -> JS : htmlComponent 事件 'pfc'（sendEventToHTMLSource）；启动时也可走 Data
- *   JS -> MATLAB : sendEventToMATLAB('action',{name}) / ('params',{...})
+ *   MATLAB -> JS : htmlComponent 事件 'pcd'（sendEventToHTMLSource）；启动时也可走 Data
+   *   JS -> MATLAB : sendEventToMATLAB('action'|'params'|'ready'|'instr', ...)
  * ============================================================ */
 (function () {
   'use strict';
@@ -19,7 +19,7 @@
     lastData = d;
     if (!(bridge.onData && d)) { return; }
     try { bridge.onData(d); }
-    catch (e) { try { console.error('[PFC] fromMatlab', e); } catch (e2) {} }
+    catch (e) { try { console.error('[PCD] fromMatlab', e); } catch (e2) {} }
   }
 
   // MATLAB 在加载 HTML 后自动调用这个全局函数（约定名，不能改）
@@ -28,8 +28,8 @@
     htmlComponent.addEventListener('DataChanged', function () {
       deliver(htmlComponent.Data);
     });
-    // 采集过程用 sendEventToHTMLSource('pfc', …)，避免每帧写 Data 触发整页重载
-    htmlComponent.addEventListener('pfc', function (ev) {
+    // 采集过程用 sendEventToHTMLSource('pcd', …)，避免每帧写 Data 触发整页重载
+    htmlComponent.addEventListener('pcd', function (ev) {
       var d = ev && (ev.HTMLEventData !== undefined ? ev.HTMLEventData : ev.Data);
       deliver(d);
     });
@@ -49,10 +49,10 @@
     try { data = JSON.parse(JSON.stringify(payload)); }
     catch (e) { data = null; }
     if (bridge.comp) { bridge.comp.sendEventToMATLAB(name, data); }
-    else { console.log('[PFC demo] -> MATLAB:', name, data); }
+    else { console.log('[PCD demo] -> MATLAB:', name, data); }
   }
 
-  /* ---------------- 配色（与 pfc_ui_colors 对齐） ---------------- */
+  /* ---------------- 配色（与 pcd_ui_colors 对齐） ---------------- */
   var C = {
     axBg: '#111419', axFg: '#C7D1E0', grid: '#373E4B',
     line: '#78ADF2', ref: '#6B788C', text: '#E6EAEF', muted: '#8B95A5'
@@ -190,9 +190,9 @@
   };
 
   /* ---------------- 采样点 / 周期数软件上下限 ---------------- */
-  /* 必须与 src/core/pfc_param_limits.m、web/index.html 的 min/max 保持同一套数字。
+  /* 必须与 src/core/pcd_param_limits.m、web/index.html 的 min/max 保持同一套数字。
    * 上限 100000：100k WORD × 2 通道，40 MSa/s ≈ 2.5 ms 窗，USB 仍可接受（旧实验上限 50k 的 2 倍）。
-   * 周期数 10000：与 pfc_param_limits.n_cycle_max 一致。不要按假 40 MSa/s 窗再压到 3000。
+   * 周期数 10000：与 pcd_param_limits.n_cycle_max 一致。不要按假 40 MSa/s 窗再压到 3000。
    * 超限必须在输入时截断并写回 x-model，否则框里仍显示 400000 / 9990，MATLAB 却按上限跑，
    * 截图会骗人。低于下限只在失焦/回车时截（逐键输入 40000 时中间的 4、40、400 还不能截）。 */
   var NPTS_MIN = 4096, NPTS_MAX = 100000;
@@ -211,7 +211,7 @@
    * T_on = n_cycle / f0_Hz；PRI = 1 / PRF
    * 界面百分数：cav_pct = 100 * duty
    * n_cycle = (cav_pct/100) * f0_Hz / PRF
-   * 例：1.5 MHz、PRF 5 Hz、n_cycle 3000 → 1%。必须与 src/core/pfc_duty.m 同一套公式。 */
+   * 例：1.5 MHz、PRF 5 Hz、n_cycle 3000 → 1%。必须与 src/core/pcd_duty.m 同一套公式。 */
   function cavPctFromNcycle(n, freqMhz, prf) {
     if (typeof n !== 'number' || typeof freqMhz !== 'number' || typeof prf !== 'number') { return NaN; }
     if (!isFinite(n) || !isFinite(freqMhz) || !isFinite(prf) || freqMhz <= 0 || prf <= 0) { return NaN; }
@@ -239,7 +239,7 @@
       dbg_freq: 1.5, dbg_volt: 20,
       freq_mhz: 1.5, volt_mVpp: 50, amp_gain: 40, prf_hz: 2, n_cycle: 400,
       cav_pct: 100 * 400 * 2 / 1.5e6, duration_s: 120, npts: 40000,
-      target_db: 2, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 5,
+      target_db: 2, ic_limit_db: 1, max_mVpp: 120, base_mVpp: 100, vstep_mVpp: 5,
       ctrl_metric: '2f_window_sum', sc_harm: '2f'
     };
     // MATLAB 若在 Alpine 启动前已写入 Data，第一帧就用存档，避免框里先闪出厂 2 dB。
@@ -250,7 +250,7 @@
   }
 
   /* ---------------- Alpine 组件 ---------------- */
-  window.pfcApp = function () {
+  window.pcdApp = function () {
     return {
       busy: false,
       paramsReady: false,  // MATLAB init 到达前不让点闭环，避免按 JS 缺省 2 开跑
@@ -264,13 +264,18 @@
       _cdTotal: 0,
       tab: 'debug',          // 步骤页：debug / nomb / open / fb（不是波形/趋势）
       runTab: '',            // 正在跑的步骤；切去看别的页时那个页签仍带 run 标记
+      awgMode: 'computer',   // computer=DG2052；manual=面板手控，电脑不连、不闭环
+      chTx: 1,
+      chPcd: 2,
+      _chTx: 1,
+      _chPcd: 2,
       titles: {
-        tx: 'CH1 时域  ·  TX',
-        pcd: 'CH2 时域  ·  PCD',
+        tx: 'CH1 时域 · 回读',
+        pcd: 'CH2 时域 · PCD',
         fftTx: '频谱  FFT  ·  CH1',
         fftPcd: '频谱  FFT  ·  CH2'
       },
-      // 字段名与 MATLAB 侧存档（pfc_gui_params）完全一致，两边共用一套词汇
+      // 字段名与 MATLAB 侧存档（pcd_gui_params）完全一致，两边共用一套词汇
       p: defaultParams(),
       charts: {},
       trend: { x: [], sc: [], ic: [], volt: [] },
@@ -473,6 +478,53 @@
         var who = this.tab === 'fb' ? '上限 ' : '发生器 ';
         return who + v + ' mVpp ×' + g + ' → ' + t + ' Vpp';
       },
+      awgHint: function () {
+        if (this.awgMode === 'manual') {
+          return '频率、电压、输出都在发生器面板上操作。停止只停采集，输出要自己关。图上的 CH 跟下面选的通道一致。';
+        }
+        return 'DG2052 由电脑设置猝发和闭环电压。回读通道坏了就改成别的 CH，图题会跟着变。';
+      },
+      onInstr: function () {
+        var tx = Number(this.chTx), pcd = Number(this.chPcd);
+        if (!(tx >= 1 && tx <= 4)) { tx = this._chTx; }
+        if (!(pcd >= 1 && pcd <= 4)) { pcd = this._chPcd; }
+        if (tx === pcd) {
+          this.chTx = this._chTx;
+          this.chPcd = this._chPcd;
+          this.status = '回读通道和 PCD 通道不能相同。';
+          return;
+        }
+        this.chTx = tx;
+        this.chPcd = pcd;
+        this._chTx = tx;
+        this._chPcd = pcd;
+        this.paintTitles();
+        toMatlab('instr', {
+          awg_mode: this.awgMode === 'manual' ? 'manual' : 'computer',
+          tx: tx,
+          pcd: pcd
+        });
+      },
+      applyInstr: function (I) {
+        if (!I || typeof I !== 'object') { return; }
+        if (I.awg_mode === 'manual' || I.awg_mode === 'computer') {
+          this.awgMode = I.awg_mode;
+        }
+        var tx = Number(I.tx), pcd = Number(I.pcd);
+        if (tx >= 1 && tx <= 4) { this.chTx = tx; this._chTx = tx; }
+        if (pcd >= 1 && pcd <= 4) { this.chPcd = pcd; this._chPcd = pcd; }
+        if (I.txTime) { this.titles.tx = I.txTime; }
+        if (I.pcdTime) { this.titles.pcd = I.pcdTime; }
+        if (I.txFft) { this.titles.fftTx = I.txFft; }
+        if (I.pcdFft) { this.titles.fftPcd = I.pcdFft; }
+      },
+      paintTitles: function () {
+        var tx = 'CH' + this.chTx, pcd = 'CH' + this.chPcd;
+        this.titles.tx = tx + ' 时域 · 回读';
+        this.titles.pcd = pcd + ' 时域 · PCD';
+        this.titles.fftTx = '频谱  FFT  ·  ' + tx;
+        this.titles.fftPcd = '频谱  FFT  ·  ' + pcd;
+      },
       scHarmHint: function () {
         var f = Number(this.p.freq_mhz), h = String(this.p.sc_harm || '2f');
         var n = 2;
@@ -491,12 +543,16 @@
         if (!d || !d.cmd) { return; }
         // 任意命令都可附带 tab，用来在实验开始时切到对应步骤页。
         if (d.tab) { this.setTab(d.tab); }
+        if (d.instr) { this.applyInstr(d.instr); }
         switch (d.cmd) {
           case 'init':
           case 'params':
             if (d.params) { Object.assign(this.p, d.params); }
             this.paramsReady = true;
             if (!this.p.ctrl_metric) { this.p.ctrl_metric = '2f_window_sum'; }
+            if (!(typeof this.p.ic_limit_db === 'number' && isFinite(this.p.ic_limit_db))) {
+              this.p.ic_limit_db = 1;
+            }
             if (!this.p.sc_harm) { this.p.sc_harm = '2f'; }
             if (!(typeof this.p.cav_pct === 'number' && isFinite(this.p.cav_pct))) {
               this.syncCavFromNcycle();
@@ -556,9 +612,9 @@
             var pp = (typeof d.pp_mV === 'number' && isFinite(d.pp_mV))
               ? ('  ' + (d.pp_mV >= 10 ? d.pp_mV.toFixed(1) : d.pp_mV.toFixed(2)) + ' mVpp')
               : '';
-            var title = slot === 'pcd'
-              ? ('CH2 时域  ·  ' + d.name + pp)
-              : ('CH1 时域  ·  ' + d.name + pp);
+            var tag = slot === 'pcd' ? ('CH' + this.chPcd) : ('CH' + this.chTx);
+            var nm = String(d.name).replace(/^CH\s*\d+\s*/i, '');
+            var title = tag + ' 时域  ·  ' + nm + pp;
             if (this.titles[slot] !== title) { this.titles[slot] = title; }
           }
         }
@@ -613,7 +669,7 @@
       startDemo: function () {
         var self = this;
         this.p.studyID = 'P0001';
-        this.p.directory = 'C:\\Users\\lab\\PFC\\data';
+        this.p.directory = 'C:\\Users\\lab\\PCD\\data';
         var Fs = 40e6, f0 = 1.5, nCyc = 16;
         var N = Math.round(nCyc * Fs / (f0 * 1e6));   // ~16 周期，与 MATLAB TX 上屏窗一致
         function wave() {
@@ -659,16 +715,16 @@
         }
         var w = wave(), s = spec('tx'), sp = spec('pcd'), pcd = pcdWave();
         this.setWave({
-          ch: 'tx', name: 'CH1 回读 TX',
+          ch: 'tx', name: '回读',
           dt_us: w.dt, y: w.y, f: s.f, db: s.db, f0: f0, f_max: 8,
-          fft_of: 'CH1 回读 TX',
+          fft_of: '回读',
           marks: [
             { f: 0.75, main: false }, { f: 1.5, main: false }, { f: 2.25, main: false },
             { f: 3.0, main: true }, { f: 3.75, main: false }, { f: 4.5, main: false }
           ]
         });
         this.setWave({
-          ch: 'pcd', name: 'CH2 PCD',
+          ch: 'pcd', name: 'PCD',
           dt_us: pcd.dt, y: pcd.y, f: sp.f, db: sp.db, f0: f0, f_max: 8,
           marks: [
             { f: 0.75, main: false }, { f: 1.5, main: false }, { f: 2.25, main: false },

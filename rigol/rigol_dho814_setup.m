@@ -1,5 +1,5 @@
-function info = rigol_dho814_setup(dev, targetFs, npts, ~, trigLevel, sweep)
-%RIGOL_DHO814_SETUP 打开 CH1 回读 + CH2 PCD。
+function info = rigol_dho814_setup(dev, targetFs, npts, ~, trigLevel, sweep, burst_s)
+%RIGOL_DHO814_SETUP 打开回读通道 + PCD 通道（通道号在仪器配置里，不写死 CH1/CH2）。
 % sweep: 'SINGle' 闭环逐发对齐；'AUTO' 调试时屏幕保持滚动。
 cfg = rigol_instr_config();
 tx  = cfg.scope_tx_channel;
@@ -10,7 +10,23 @@ end
 if nargin < 6 || isempty(sweep)
     sweep = 'SINGle';
 end
+if nargin < 7 || isempty(burst_s) || ~isfinite(burst_s) || burst_s <= 0
+    burst_s = [];
+end
 
+% 清掉上一轮留在屏幕上的远程指令错误。
+try, writeline(dev, '*CLS'); catch, end
+
+% 先把存储深度降到两通道都合法的档，再开通道。DHO814 单通道可以停在 25M，
+% 这时再打开第二路，示波器会报远程指令错误。
+mdTag = rigol_dho814_pick_mdepth(npts);
+if strcmp(mdTag, '25M')
+    mdTag = '10M';
+end
+writeline(dev, [':ACQuire:MDEPth ' mdTag]);
+
+% 只打开要用的两路，不要 DISPlay OFF。触发源还停在旧通道（常常是坏掉的 CH1）时，
+% 关掉那一路是设置冲突，屏幕会一直挂着「远程指令错误」。不用的通道留在示波器上即可。
 for ch = [tx, pcd]
     chan = sprintf('CHANnel%d', ch);
     writeline(dev, sprintf(':%s:DISPlay ON', chan));
@@ -20,8 +36,6 @@ end
 writeline(dev, sprintf(':CHANnel%d:SCALe 0.05', tx));
 writeline(dev, sprintf(':CHANnel%d:SCALe 0.05', pcd));
 
-mdTag = rigol_dho814_pick_mdepth(npts);
-writeline(dev, [':ACQuire:MDEPth ' mdTag]);
 writeline(dev, ':ACQuire:TYPE NORMal');
 
 t_total = npts / targetFs;
@@ -60,6 +74,22 @@ info.wf_yinc      = qnum(dev, ':WAVeform:YINCrement?');
 writeline(dev, ':RUN');
 
 realFs = str2double(rigol_visa_query(dev, ':ACQuire:SRATe?'));
+% 内存以触发点为中心。100k 点、12.5 MHz 时一共 8 ms，触发后只有 4 ms，
+% 6.7 ms 脉冲的后半段不在内存里，读 RAW 还会带上触发前的空档。
+% 把深度加到「触发后仍盖住整段脉冲」，读的时候再从触发点起截。不拉长时基，
+% 避免采样率掉到看不到 6 MHz。
+if ~isempty(burst_s) && isfinite(realFs) && realFs > 0
+    n_need = max(npts, ceil(2.15 * burst_s * realFs));
+    tag2 = rigol_dho814_pick_mdepth(n_need);
+    if strcmp(tag2, '25M')
+        tag2 = '10M';
+    end
+    if ~strcmp(tag2, mdTag)
+        writeline(dev, [':ACQuire:MDEPth ' tag2]);
+        fprintf(['内存深度 %s → %s：触发在记录中点时，触发后仍盖住 %.2f ms 脉冲。\n'], ...
+            mdTag, tag2, burst_s * 1e3);
+    end
+end
 info.timeIntervalNanoSeconds = (1 / realFs) * 1e9;
 info.realFs = realFs;
 info.scope_channel = pcd;

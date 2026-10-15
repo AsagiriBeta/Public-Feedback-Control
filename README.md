@@ -1,4 +1,4 @@
-# Public-Feedback-Control
+# Passive-Cavitation-Detection
 
 PCD（被动空化检测）采集与闭环超声反馈控制。算法来自 Washington University Chen 实验室（Chien 等, *CMMM* 2022, [9867230](https://doi.org/10.1155/2022/9867230)）。本实验室 PCD 中心约 **3 MHz**，稳态空化 SC 用 **2f（3.0 MHz）**，不用原文因 4.7 MHz PCD 而选的 3f（4.5 MHz）。
 
@@ -35,7 +35,7 @@ DHO814 **没有 EXT 口**，因此用 CH1 边沿触发每一发。无换能器/5
 下面三条都是拿真实数据定位出来的，改动前请确认没有把问题放回去。改完跑一次：
 
 ```matlab
-pfc_selftest_acquisition     % 不需要接仪器
+pcd_selftest_acquisition     % 不需要接仪器
 ```
 
 ### 1. 波形必须用 WORD 读，不要改回 BYTE
@@ -53,7 +53,7 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 
 ### 2. CH2 量程要留余量，削顶帧必须重采
 
-量程照**上一帧**峰值定（`pfc_run_experiment` 的 `set_ranges`，系数 `K=1.4`：
+量程照**上一帧**峰值定（`pcd_run_experiment` 的 `set_ranges`，系数 `K=1.4`：
 满量程 ≈ 2.8× 峰值）。旧的 `/3.2` 余量只有 36%，信号一变大就顶穿量程。
 
 为什么必须拦：**对称削顶只生奇次谐波**（3f/5f），偶次反而被压掉，于是 3f 假性飙升。
@@ -112,8 +112,8 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 需要：**MATLAB R2026a**、**Instrument Control Toolbox**、已安装的 **NI-VISA**。
 
 ```matlab
-cd('<项目目录>')     % 例如 D:\Projects\Public-Feedback-Control
-pfc_app             % 启动界面（会自动把 src/ rigol/ 等加进路径）
+cd('<项目目录>')     % 例如 D:\Projects\Passive-Cavitation-Detection
+pcd_app             % 启动界面（会自动把 src/ rigol/ 等加进路径）
 ```
 
 界面上 **单次采集 FFT 并保存** 会从 DHO814 读回时域波形，在电脑上算 FFT。**无微泡 / 有微泡开环 / 闭环** 每一发同样刷新时域+FFT。结束后（以及 oneshot / 调试）都写成**一个目录**，raw 和分析图放在一起：
@@ -121,7 +121,7 @@ pfc_app             % 启动界面（会自动把 src/ rigol/ 等加进路径）
 ```
 data/OpenMB_run_YYYYMMDD_HHMMSS/
   raw.mat           % 与旧扁平 .mat 同一套字段（顶层旧名 + params）
-  params.txt        % pfc_save_params 快照
+  params.txt        % pcd_save_params 快照
   fft_ch1.png       % CH1 谱，标 f0
   fft_ch2.png       % CH2 谱，标 f0/2f 与 2.85/4.18 EMI
   time_ch1_ch2.png  % 短时域片段
@@ -137,7 +137,7 @@ DHO814 **示波器屏幕上有 Math FFT**（最多约 1 Mpts，见 [DHO800 数�
 命令窗口也可：
 
 ```matlab
-pfc_setup                % 把各子目录加进路径（新开一个 MATLAB 会话时跑一次）
+pcd_setup                % 把各子目录加进路径（新开一个 MATLAB 会话时跑一次）
 test_dg2052_connection   % 信号源自检（默认不开输出）
 oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保存
 ```
@@ -145,11 +145,11 @@ oneshot_fft_plot         % 开环发一帧、收一帧，弹窗画频谱并保�
 ## 目录
 
 ```
-Public-Feedback-Control/
-├── pfc_app.m             启动入口（打包入口）
-├── pfc_setup.m           把各子目录加进 MATLAB 搜索路径（新会话跑一次）
-├── pfc_root.m            可写工作根 / 路径锚点
-├── pfc_version.m         版本号（发版只改这里）
+Passive-Cavitation-Detection/
+├── pcd_app.m             启动入口（打包入口）
+├── pcd_setup.m           把各子目录加进 MATLAB 搜索路径（新会话跑一次）
+├── pcd_root.m            可写工作根 / 路径锚点
+├── pcd_version.m         版本号（发版只改这里）
 ├── update.json           发布清单（目标机「检查更新」读它）
 ├── src/
 │   ├── ui/               界面层：uifigure 宿主、UI 适配层、配色、对话框
@@ -157,8 +157,8 @@ Public-Feedback-Control/
 │   └── io/               仪器与配置：VISA、参数存档、检查更新
 ├── rigol/                RIGOL DHO814 / DG2052 驱动与自检、单次收发
 ├── web/                  新版界面前端：index.html + Alpine.js + uPlot（离线静态资源）
-├── tools/                构建与发布脚本（不参与运行）：pfc_build_exe / pfc_release
-├── tests/                不依赖硬件的自检：pfc_selftest_acquisition
+├── tools/                构建与发布脚本（不参与运行）：pcd_build_exe / pcd_release
+├── tests/                不依赖硬件的自检：pcd_selftest_acquisition
 ├── data/                 采集默认保存目录（不入库）
 └── manuals/              厂商手册副本（不入库）
 ```
@@ -167,42 +167,42 @@ Public-Feedback-Control/
 
 | 路径 | 内容 |
 |------|------|
-| `src/ui/pfc_ui_app.m` | 新版界面宿主（`uifigure` + `uihtml`）与事件分发 |
-| `src/ui/pfc_ui_html.m` | UI 适配层：算法层只认这层接口（约定与校验见 `pfc_ui_check.m`） |
-| `src/ui/pfc_ui_check.m` | 校验算法层收到的适配层是否具备约定接口 |
-| `src/ui/pfc_ui_push.m` / `pfc_web_root.m` | 推数据给前端 / 前端资源路径（源码·打包两种模式） |
-| `src/ui/pfc_instr_dialog.m` | 仪器设置对话框（扫描 + 选择 + 手动输入） |
-| `src/ui/pfc_update_flow.m` | 「检查更新」交互流程 |
-| `src/core/pfc_fus_params.m` | FUS 参数校验与推导（唯一出处） |
-| `src/core/pfc_run_experiment.m` / `pfc_oneshot.m` / `pfc_debug_run.m` | 闭环 / 单次 / 调试流程 |
-| `src/core/pfc_debug_no_mb.m` / `pfc_debug_live.m` | 开环调试与运行中实时改参数 |
-| `src/core/pfc_spectrum.m` / `pfc_band_energy.m` / `pfc_fft_peak_mhz.m` | 信号处理 |
-| `src/core/pfc_save_acquisition.m` / `pfc_save_run_plots.m` | 一次实验一个目录（raw.mat + 分析图） |
-| `src/core/pfc_save_params.m` | 存盘参数快照 |
-| `src/core/pfc_fitrow.m` | 采样帧定长整形（空帧/不等长帧的兜底，两种采集路径共用） |
-| `src/io/pfc_visa.m` | 仪器连接与运行锁 |
-| `src/io/pfc_prefs.m` | 界面参数持久化 |
-| `src/io/pfc_update.m` | 检查更新（默认源写死 + 本地 `pfc_update.ini` 覆盖） |
+| `src/ui/pcd_ui_app.m` | 新版界面宿主（`uifigure` + `uihtml`）与事件分发 |
+| `src/ui/pcd_ui_html.m` | UI 适配层：算法层只认这层接口（约定与校验见 `pcd_ui_check.m`） |
+| `src/ui/pcd_ui_check.m` | 校验算法层收到的适配层是否具备约定接口 |
+| `src/ui/pcd_ui_push.m` / `pcd_web_root.m` | 推数据给前端 / 前端资源路径（源码·打包两种模式） |
+| `src/ui/pcd_instr_dialog.m` | 仪器设置对话框（扫描 + 选择 + 手动输入） |
+| `src/ui/pcd_update_flow.m` | 「检查更新」交互流程 |
+| `src/core/pcd_fus_params.m` | FUS 参数校验与推导（唯一出处） |
+| `src/core/pcd_run_experiment.m` / `pcd_oneshot.m` / `pcd_debug_run.m` | 闭环 / 单次 / 调试流程 |
+| `src/core/pcd_debug_no_mb.m` / `pcd_debug_live.m` | 开环调试与运行中实时改参数 |
+| `src/core/pcd_spectrum.m` / `pcd_band_energy.m` / `pcd_fft_peak_mhz.m` | 信号处理 |
+| `src/core/pcd_save_acquisition.m` / `pcd_save_run_plots.m` | 一次实验一个目录（raw.mat + 分析图） |
+| `src/core/pcd_save_params.m` | 存盘参数快照 |
+| `src/core/pcd_fitrow.m` | 采样帧定长整形（空帧/不等长帧的兜底，两种采集路径共用） |
+| `src/io/pcd_visa.m` | 仪器连接与运行锁 |
+| `src/io/pcd_prefs.m` | 界面参数持久化 |
+| `src/io/pcd_update.m` | 检查更新（默认源写死 + 本地 `pcd_update.ini` 覆盖） |
 | `rigol/rigol_scan_instruments.m` / `rigol_visa_table.m` | 仪器自动扫描 / `visadevlist` 返回值解析 |
 | `rigol/rigol_decode_waveform.m` / `rigol_dho814_clipped.m` | 波形解码（WORD/BYTE）／削顶判定 |
-| `tests/pfc_selftest_acquisition.m` | 采集链自检（不需要仪器） |
+| `tests/pcd_selftest_acquisition.m` | 采集链自检（不需要仪器） |
 
 幅度单位为 **mVpp**。本实验室无位移台，电机区已从界面隐藏。
 
 ## 一套源码，两种运行方式
 
-开发调试与打包分发共用同一份代码，差异只由 `isdeployed` 与 `pfc_root()` 处理。新增功能请只走下列入口，不要在别处再写一套：
+开发调试与打包分发共用同一份代码，差异只由 `isdeployed` 与 `pcd_root()` 处理。新增功能请只走下列入口，不要在别处再写一套：
 
 | 关注点 | 唯一出处 |
 |--------|----------|
-| 启动入口 | `pfc_app.m` |
-| 可写路径（存档 / 数据 / 配置） | `pfc_root()` |
-| 前端样式 / 配色 | `web/app.css`（页面）+ `src/ui/pfc_ui_colors.m`（MATLAB 原生窗口与对话框） |
+| 启动入口 | `pcd_app.m` |
+| 可写路径（存档 / 数据 / 配置） | `pcd_root()` |
+| 前端样式 / 配色 | `web/app.css`（页面）+ `src/ui/pcd_ui_colors.m`（MATLAB 原生窗口与对话框） |
 | 仪器地址 | `rigol/rigol_instr_config.m`（默认值 + 本地 `rigol_config.ini`） |
-| 界面参数 | `src/io/pfc_prefs.m` |
-| FUS 参数校验 | `src/core/pfc_fus_params.m` |
-| 版本号 | `pfc_version.m`（发版只改这里） |
-| 更新源 | `src/io/pfc_update.m` + 本地 `pfc_update.ini`（没有该文件＝关闭更新检查） |
+| 界面参数 | `src/io/pcd_prefs.m` |
+| FUS 参数校验 | `src/core/pcd_fus_params.m` |
+| 版本号 | `pcd_version.m`（发版只改这里） |
+| 更新源 | `src/io/pcd_update.m` + 本地 `pcd_update.ini`（没有该文件＝关闭更新检查） |
 
 ## 本机配置的存放位置
 
@@ -211,13 +211,13 @@ Public-Feedback-Control/
 | 运行方式 | 工作根 | 说明 |
 |----------|--------|------|
 | 源码运行 | 项目根目录 | 与以前一致 |
-| 打包 exe 运行 | `%LOCALAPPDATA%\PFC`（Windows） | 可用环境变量 `PFC_HOME` 指定别处 |
+| 打包 exe 运行 | `%LOCALAPPDATA%\PCD`（Windows） | 可用环境变量 `PCD_HOME` 指定别处 |
 
 | 文件 | 作用 | 删除后 |
 |------|------|--------|
-| `pfc_prefs.mat` | 界面参数存档 | 回到界面默认值 |
+| `pcd_prefs.mat` | 界面参数存档 | 回到界面默认值 |
 | `rigol_config.ini` | 仪器 VISA 地址与通道覆盖 | 回到空地址（须重新扫描） |
-| `pfc_update.ini` | 更新源地址 | 关闭更新检查 |
+| `pcd_update.ini` | 更新源地址 | 关闭更新检查 |
 | `data/` | 默认采集输出目录 | 下次自动重建 |
 
 仪器地址在界面点 **仪器设置** 即可修改（换仪器/换电脑无需改代码）。点进去先 **扫描仪器**，
@@ -230,16 +230,16 @@ MATLAB 只负责仪器与算法，两者走 `uihtml` 的双向通道：
 
 | 方向 | 通道 |
 |------|------|
-| MATLAB → 前端 | `pfc_ui_push`（写 `h.Data`） |
-| 前端 → MATLAB | `sendEventToMATLAB` → `src/ui/pfc_ui_app.m` 里的 `pfc_ui_event` |
+| MATLAB → 前端 | `pcd_ui_push`（写 `h.Data`） |
+| 前端 → MATLAB | `sendEventToMATLAB` → `src/ui/pcd_ui_app.m` 里的 `pcd_ui_event` |
 
 布局、分辨率/DPI 自适应、圆角一律交给 CSS，图表交给 uPlot；MATLAB 侧只有窗口底色和
-「仪器设置」对话框需要自己配色，见 `src/ui/pfc_ui_colors.m`。
+「仪器设置」对话框需要自己配色，见 `src/ui/pcd_ui_colors.m`。
 
-算法层不直接碰控件，只通过「UI 适配层」（`src/ui/pfc_ui_html.m`）操作界面：它把界面操作收敛成
+算法层不直接碰控件，只通过「UI 适配层」（`src/ui/pcd_ui_html.m`）操作界面：它把界面操作收敛成
 `ui.params() / ui.raw() / ui.debugfv() / ui.outdir() / ui.waveform() / ui.trend() /
-ui.clearTrend() / ui.status()` 八个函数句柄，接口约定与校验见 `src/ui/pfc_ui_check.m`。
-因此 `pfc_run_experiment`、`pfc_oneshot`、`pfc_debug_run`、`pfc_debug_no_mb` 与界面完全无关 ——
+ui.clearTrend() / ui.status()` 八个函数句柄，接口约定与校验见 `src/ui/pcd_ui_check.m`。
+因此 `pcd_run_experiment`、`pcd_oneshot`、`pcd_debug_run`、`pcd_debug_no_mb` 与界面完全无关 ——
 将来要换一种界面实现，算法层一行都不用改。
 
 前端可**脱离 MATLAB 单独在浏览器预览**（自动跑演示数据），调样式很快：
@@ -255,14 +255,14 @@ cd web && python3 -m http.server 8765   # 打开 http://127.0.0.1:8765
 `visadev` 通信要随 exe 打进 Runtime 侧依赖（缺 ICT 编译时直接报错），安装包由 Compiler SDK 生成。
 
 ```matlab
-pfc_build_exe                  % 编译 exe，并打包安装程序
-pfc_build_exe('noinstaller')   % 只编译 exe
+pcd_build_exe                  % 编译 exe，并打包安装程序
+pcd_build_exe('noinstaller')   % 只编译 exe
 ```
 
 脚本会先把项目根下所有子目录（`src/`、`rigol/` 等）加进路径再编译 —— mcc 的依赖分析只认
 「编译时在路径上」的文件，漏掉 `src/` 或 `rigol/` 会编译通过、exe 一跑才报 `Undefined function`。
 `web/` 属于静态资源、不在依赖分析范围内，由脚本作为附加文件打进去；注意打包后它**不在**
-`<ctfroot>\web`，而被解到 `<ctfroot>\pfc_app\web`，定位逻辑见 `src/ui/pfc_web_root.m`。
+`<ctfroot>\web`，而被解到 `<ctfroot>\pcd_app\web`，定位逻辑见 `src/ui/pcd_web_root.m`。
 
 打包用 `compiler.build.standaloneWindowsApplication`，**不要**换回 `standaloneApplication`：
 后者生成的是控制台子系统程序，双击会先弹一个黑色 cmd 窗口，界面还没出来；关掉它还连带把程序关掉。
@@ -272,15 +272,15 @@ pfc_build_exe('noinstaller')   % 只编译 exe
 
 | 文件 | 说明 |
 |------|------|
-| `pfc_app.exe` | 独立程序本体（约 1.5 MB，已内含 `src/`、`rigol/` 驱动与 `web/` 前端资源） |
-| `PFC_Installer_v<版本>.exe` | 分发用安装程序（约 3 MB）；**文件名带版本号**，下载目录里一眼能区分 |
+| `pcd_app.exe` | 独立程序本体（约 1.5 MB，已内含 `src/`、`rigol/` 驱动与 `web/` 前端资源） |
+| `PCD_Installer_v<版本>.exe` | 分发用安装程序（约 3 MB）；**文件名带版本号**，下载目录里一眼能区分 |
 
-程序内部的程序名固定为 `pfc_app`（不带版本号）—— 若把版本号写进程序名，每版在 Windows 眼里
+程序内部的程序名固定为 `pcd_app`（不带版本号）—— 若把版本号写进程序名，每版在 Windows 眼里
 都是另一个产品，覆盖安装会失效、「应用和功能」里还会堆一串旧条目。
 
 ## 分发到目标机
 
-**只分发 `PFC_Installer_v<版本>.exe` 即可。** 目标机双击它，安装向导会自动从 MathWorks 下载并
+**只分发 `PCD_Installer_v<版本>.exe` 即可。** 目标机双击它，安装向导会自动从 MathWorks 下载并
 安装 MATLAB Runtime，装完桌面/开始菜单就有图标，之后点击即用 —— 部署的人不用自己去找 Runtime。
 
 前提是**目标机安装时能上外网**（安装器会拉 ~5 GB 的 Runtime）。交付方式由脚本自动选：
@@ -290,7 +290,7 @@ pfc_build_exe('noinstaller')   % 只编译 exe
 | 没有 Runtime 安装包（默认） | `web` | 联网自动下载并安装 Runtime |
 | 先跑过 `compiler.runtime.download` | `installer` | 断网也能装（安装包体积大得多） |
 
-`pfc_app.exe` **不能单独分发**：MATLAB Compiler 生成的 exe 不含解释器，必须在本机找到
+`pcd_app.exe` **不能单独分发**：MATLAB Compiler 生成的 exe 不含解释器，必须在本机找到
 版本匹配的 MATLAB Runtime（它靠注册表定位，`RegQueryValueExW`），因此不存在"拷贝即运行"
 的免安装形态 —— 绿色版这条路走不通。
 
@@ -305,11 +305,11 @@ pfc_build_exe('noinstaller')   % 只编译 exe
 
 - **走界面里的「检查更新」最省事**：程序会自己下载、关闭、再启动安装程序，不需要你手工处理。
 - **手动装的话，必须先退出程序。** MATLAB 生成的安装程序**既不检测也不提示**目标程序是否在
-  运行 —— 遇到被占用的 `pfc_app.exe` 会**静默跳过替换**，装完看着像装成功了，其实还是旧版。
+  运行 —— 遇到被占用的 `pcd_app.exe` 会**静默跳过替换**，装完看着像装成功了，其实还是旧版。
   确认装没装上的办法：看 Windows「应用和功能」里的版本号，或程序窗口标题上的版本号。
-- **卸载**：Windows「设置 → 应用」里的 `pfc_app`，或直接运行
-  `%ProgramFiles%\pfc_app\uninstall\bin\win64\Uninstall_Application.exe`。
-  卸载不会动 `%LOCALAPPDATA%\PFC` 下的采集数据与界面参数。
+- **卸载**：Windows「设置 → 应用」里的 `pcd_app`，或直接运行
+  `%ProgramFiles%\pcd_app\uninstall\bin\win64\Uninstall_Application.exe`。
+  卸载不会动 `%LOCALAPPDATA%\PCD` 下的采集数据与界面参数。
 
 ## 软件更新
 
@@ -318,17 +318,17 @@ pfc_build_exe('noinstaller')   % 只编译 exe
 ### 怎么工作
 
 1. 取更新源（**写死在程序里**，见下；运维可用本地配置文件覆盖）；
-2. 拉取该地址的**更新清单**（JSON），与 `pfc_version()` 比较版本；
+2. 拉取该地址的**更新清单**（JSON），与 `pcd_version()` 比较版本；
 3. 没有新版就直接告诉你「已是最新版本」，到此结束；
 4. 有新版才弹窗问一句，确认后：下载安装包到临时目录 → **自动关闭本程序** → 启动安装程序
-   （留 5 秒等程序退出。安装程序替换不掉正在使用的 `pfc_app.exe`，所以必须先退）。
+   （留 5 秒等程序退出。安装程序替换不掉正在使用的 `pcd_app.exe`，所以必须先退）。
 
 ### 更新源
 
-**默认源已经写死在程序里**（`pfc_update.m` 的 `default_source()`），指向本仓库：
+**默认源已经写死在程序里**（`pcd_update.m` 的 `default_source()`），指向本仓库：
 
 ```
-https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
+https://raw.githubusercontent.com/AsagiriBeta/Passive-Cavitation-Detection/main/update.json
 ```
 
 所以目标机**装上就能直接点「检查更新」，不用先配一遍**。
@@ -336,15 +336,15 @@ https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/updat
 | 内容 | 放哪 |
 |------|------|
 | `update.json` | 仓库根目录（就几行文本，跟着源码走） |
-| `PFC_Installer_v<版本>.exe` | **GitHub Release 附件**（不提交进仓库，否则每发一版都给 git 历史永久增加约 3 MB） |
+| `PCD_Installer_v<版本>.exe` | **GitHub Release 附件**（不提交进仓库，否则每发一版都给 git 历史永久增加约 3 MB） |
 
 **界面上没有任何更新源设置** —— 用户点「检查更新」只会得到「有更新」或「已是最新」两种结果。
-`pfc_update.ini` 是留给运维的兜底（内网服务器、局域网共享、隔离网回不了源），装上后不生成、
+`pcd_update.ini` 是留给运维的兜底（内网服务器、局域网共享、隔离网回不了源），装上后不生成、
 不提示，需要时才手工放一个：
 
 ```
-source=https://example.com/pfc/update.json     # 任意 HTTPS，Gitee / 内网服务器同理
-source=\\server\share\pfc\update.json          # 局域网共享，目标机不必上网
+source=https://example.com/pcd/update.json     # 任意 HTTPS，Gitee / 内网服务器同理
+source=\\server\share\pcd\update.json          # 局域网共享，目标机不必上网
 source=none                                    # 关闭更新检查
 ```
 
@@ -364,30 +364,30 @@ source=none                                    # 关闭更新检查
 ### 更新清单格式
 
 `url` 指向**带版本号的那次 Release**（不是 `releases/latest`）：文件名带版本号后，`latest` 那条
-路会指向不存在的旧文件名。`version` 与 `url` 都由 `pfc_installer_asset.m` 按当前版本算出，
+路会指向不存在的旧文件名。`version` 与 `url` 都由 `pcd_installer_asset.m` 按当前版本算出，
 你只维护 `notes`：
 
 ```json
 {
   "version": "0.2.0",
-  "url": "https://github.com/AsagiriBeta/Public-Feedback-Control/releases/download/v0.2.0/PFC_Installer_v0.2.0.exe",
+  "url": "https://github.com/AsagiriBeta/Passive-Cavitation-Detection/releases/download/v0.2.0/PCD_Installer_v0.2.0.exe",
   "notes": "新增仪器自动扫描；修复 XXX"
 }
 ```
 
 ### 发版流程
 
-**只需改 `pfc_version.m` 里的版本号，然后跑一条命令：**
+**只需改 `pcd_version.m` 里的版本号，然后跑一条命令：**
 
 ```matlab
-pfc_version                            % 看一眼当前版本
-pfc_release                            % 打包 → 建 v<版本> Release 并上传安装包 → 推送清单
-pfc_release('notes', '这一版改了什么')   % 顺手写更新说明
+pcd_version                            % 看一眼当前版本
+pcd_release                            % 打包 → 建 v<版本> Release 并上传安装包 → 推送清单
+pcd_release('notes', '这一版改了什么')   % 顺手写更新说明
 ```
 
-`pfc_release` 会自动：校验版本号（tag 已存在就拒绝，防重复发版）→ 打包 → 建 `v<版本>`
+`pcd_release` 会自动：校验版本号（tag 已存在就拒绝，防重复发版）→ 打包 → 建 `v<版本>`
 的 Release 并上传安装包 → 提交并推送 `update.json`。清单里的 `version` 直接取自
-`pfc_version()`，所以不会出现「包是新的、清单还是旧的」。
+`pcd_version()`，所以不会出现「包是新的、清单还是旧的」。
 
 前置条件（各一次）：
 
@@ -405,17 +405,17 @@ pfc_release('notes', '这一版改了什么')   % 顺手写更新说明
 
 | 目标机当前版本 | 升级方式 |
 |----------------|----------|
-| v0.1.0 之前（无更新按钮） | 拷 `PFC_Installer_v<版本>.exe` 过去，**先退出程序**再双击；装完就有更新功能了 |
+| v0.1.0 之前（无更新按钮） | 拷 `PCD_Installer_v<版本>.exe` 过去，**先退出程序**再双击；装完就有更新功能了 |
 | v0.1.0 / v0.1.1 | 点 **检查更新** → 确认 → 自动下载并启动安装器；这两版**不会自动关程序**，要自己先关 |
 | v0.1.2 及以后 | 点 **检查更新** → 确认 → 自动下载 → **自动关闭程序** → 启动安装器 |
 
 几点注意：
 
-- **装之前程序必须是关的**（v0.1.2 起由程序自动关闭）。安装程序替换不掉运行中的 `pfc_app.exe`，
+- **装之前程序必须是关的**（v0.1.2 起由程序自动关闭）。安装程序替换不掉运行中的 `pcd_app.exe`，
   而且它**不报错也不提示**，装完看着像成功、其实还是旧版 —— 用「应用和功能」或窗口标题上的
   版本号确认一下最稳。
 - **不用先卸载旧版**：安装程序装到同一目录并覆盖程序文件。
-- **参数与数据不会丢**：界面参数、仪器地址在 `%LOCALAPPDATA%\PFC` 下，不在安装目录里，
+- **参数与数据不会丢**：界面参数、仪器地址在 `%LOCALAPPDATA%\PCD` 下，不在安装目录里，
   采集数据也在你指定的目录，升级都不受影响 —— 装完不用重调参数。
 - 升级后建议先点 **仪器设置 → 扫描仪器** 确认仪器还认得出来，再跑采集。
 

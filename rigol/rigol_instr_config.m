@@ -71,10 +71,12 @@ function cfg = defaults()
 cfg.scope_visa = '';
 cfg.awg_visa   = '';
 
-cfg.scope_tx_channel  = 1;   % 发生器回读
+cfg.scope_tx_channel  = 1;   % 发生器回读（示波器通道，CH1 坏了可改成 2–4）
 cfg.scope_pcd_channel = 2;   % PCD
 cfg.scope_channel     = 2;   % 兼容旧代码：默认采 PCD
 cfg.awg_channel       = 1;
+% computer：电脑控制 DG2052，可闭环。manual：另一台发生器手调，电脑不连、不闭环。
+cfg.awg_mode          = 'computer';
 
 cfg.acquire_timeout_s = 12;
 
@@ -85,7 +87,7 @@ cfg.harmonic_bandwidth_hz = 20e3;  % Chien 2022：SC/IC 均为 ±20 kHz
 end
 
 function f = cfg_file()
-f = fullfile(pfc_root(), 'rigol_config.ini');
+f = fullfile(pcd_root(), 'rigol_config.ini');
 end
 
 function cfg = merged()
@@ -97,7 +99,7 @@ end
 % 只接受白名单键，避免误改内部字段
 numKeys = {'scope_tx_channel', 'scope_pcd_channel', 'awg_channel', 'acquire_timeout_s', ...
     'harmonic_bandwidth_hz', 'scope_vdiv'};
-strKeys = {'scope_visa', 'awg_visa'};
+strKeys = {'scope_visa', 'awg_visa', 'awg_mode'};
 try
     lines = splitlines(fileread(f));
 catch
@@ -137,18 +139,19 @@ for fn = fieldnames(d)'
     end
 end
 txt = sprintf([ ...
-    '# PFC 仪器配置（本地覆盖，不入 git）\n' ...
+    '# PCD 仪器配置（本地覆盖，不入 git）\n' ...
     '# 换仪器：界面点「仪器设置 → 扫描仪器」，或 visadevlist 后把 ResourceName 填到下面。\n' ...
     '# 删除本文件即回到空地址（必须重新扫描）。保存时会写下全部可配字段。\n' ...
     'scope_visa=%s\n' ...
     'awg_visa=%s\n' ...
+    'awg_mode=%s\n' ...
     'scope_tx_channel=%g\n' ...
     'scope_pcd_channel=%g\n' ...
     'awg_channel=%g\n' ...
     'acquire_timeout_s=%g\n' ...
     'harmonic_bandwidth_hz=%g\n' ...
     'scope_vdiv=%g\n'], ...
-    char(cfg.scope_visa), char(cfg.awg_visa), ...
+    char(cfg.scope_visa), char(cfg.awg_visa), awg_mode_of(cfg), ...
     cfg.scope_tx_channel, cfg.scope_pcd_channel, cfg.awg_channel, ...
     cfg.acquire_timeout_s, cfg.harmonic_bandwidth_hz, cfg.scope_vdiv);
 fid = fopen(f, 'w');
@@ -157,4 +160,11 @@ if fid < 0
 end
 fprintf(fid, '%s', txt);
 fclose(fid);
+end
+
+function m = awg_mode_of(cfg)
+m = 'computer';
+if isfield(cfg, 'awg_mode') && strcmpi(strtrim(char(string(cfg.awg_mode))), 'manual')
+    m = 'manual';
+end
 end

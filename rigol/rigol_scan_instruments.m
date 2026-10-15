@@ -14,7 +14,7 @@ function [devs, msg] = rigol_scan_instruments(varargin)
 %
 % 第二个输出 msg 是给界面显示的一行摘要（含失败原因）。
 %
-% 为什么要先 pfc_visa('close')：扫描会**临时打开**资源做握手，本程序已占用的
+% 为什么要先 pcd_visa('close')：扫描会**临时打开**资源做握手，本程序已占用的
 % 示波器/信号源会被判成「资源被占用」。调用方负责先释放单例连接。
 %
 % 注意：串口（ASRL）发 *IDN? 可能长时间无响应，默认跳过（'probeASRL', true 可开）。

@@ -3,16 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PFC · DHO814 / DG2052</title>
+<title>PCD · DHO814 / DG2052</title>
 <link rel="stylesheet" href="vendor/uPlot.min.css">
 <link rel="stylesheet" href="app.css?v=scharm1">
 <script src="vendor/uplot.iife.min.js"></script>
-<script src="app.js?v=scband3"></script>
+<script src="app.js?v=iclim2"></script>
 <script defer src="vendor/alpine.min.js"></script>
 </head>
-<!-- 参数名与 MATLAB 侧存档字段一致（pfc_gui_params），两边共用一套词汇，
+<!-- 参数名与 MATLAB 侧存档字段一致（pcd_gui_params），两边共用一套词汇，
      所以从 GUIDE 切到本界面、或「检查更新」升级后，参数都不会丢。 -->
-<body x-data="pfcApp()" :class="{busy:busy}">
+<body x-data="pcdApp()" :class="{busy:busy}">
 
 <div class="app">
 
@@ -32,12 +32,44 @@
         <input type="text" x-model="p.directory" @input="pushParams(false)" @change="pushParams(true)" placeholder="choose directory...">
       </div>
       <div class="btns">
-        <button class="ghost" @click="action('instr')" :disabled="busy">仪器设置</button>
+        <button class="ghost" @click="action('instr')" :disabled="busy">仪器地址</button>
       </div>
     </section>
 
     <section class="card">
-      <h2>超声参数 <span class="en">(2 / 3 用治疗电压；4 用假超声 / 步进 / 上限)</span></h2>
+      <h2>信号源与通道 <span class="en">/ Source &amp; channels</span></h2>
+      <div class="row" style="grid-template-columns:74px 1fr">
+        <label>信号源</label>
+        <select x-model="awgMode" @change="onInstr()" :disabled="busy">
+          <option value="computer">电脑控制 DG2052</option>
+          <option value="manual">手动（不连电脑、不闭环）</option>
+        </select>
+      </div>
+      <div class="hint" x-text="awgHint()"></div>
+      <div class="row">
+        <label>回读</label>
+        <select x-model.number="chTx" @change="onInstr()" :disabled="busy">
+          <option value="1">CH1</option>
+          <option value="2">CH2</option>
+          <option value="3">CH3</option>
+          <option value="4">CH4</option>
+        </select>
+        <span class="unit">示波器</span>
+      </div>
+      <div class="row">
+        <label>PCD</label>
+        <select x-model.number="chPcd" @change="onInstr()" :disabled="busy">
+          <option value="1">CH1</option>
+          <option value="2">CH2</option>
+          <option value="3">CH3</option>
+          <option value="4">CH4</option>
+        </select>
+        <span class="unit">示波器</span>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>超声参数 <span class="en">(2 / 3 用治疗电压；4 用假超声 / IC 上限 / 电压上限)</span></h2>
       <div class="row">
         <label>频率</label>
         <input type="number" step="0.01" x-model.number="p.freq_mhz" @input="onDutyDrivers(false)" @change="onDutyDrivers(true)" :disabled="busy">
@@ -75,13 +107,13 @@
       </div>
       <!-- 空化率 duty = T_on/PRI = n_cycle * PRF / f0_Hz；界面百分数 cav_pct = 100*duty。
            n_cycle = (cav_pct/100) * f0_Hz / PRF。改空化率更新周期数，改周期数/频率/PRF 更新空化率。
-           周期数是 DG2052 BurstCount，必须留着。与 src/core/pfc_duty.m 同一套公式。 -->
+           周期数是 DG2052 BurstCount，必须留着。与 src/core/pcd_duty.m 同一套公式。 -->
       <div class="row">
         <label>空化率</label>
         <input type="number" step="any" min="0" x-model.number="p.cav_pct" @input="onCavPct(false)" @change="onCavPct(true)" :disabled="busy">
         <span class="unit">%</span>
       </div>
-      <!-- 周期数 min/max 必须与 src/core/pfc_param_limits.m、web/app.js 一致。
+      <!-- 周期数 min/max 必须与 src/core/pcd_param_limits.m、web/app.js 一致。
            软件上限 10000；超过就立刻截成 10000 并写回输入框。截断后空化率也要按真实 n_cycle 写回。 -->
       <div class="row">
         <label>周期数</label>
@@ -93,7 +125,7 @@
         <input type="number" step="1" x-model.number="p.duration_s" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
         <span class="unit">s</span>
       </div>
-      <!-- 每帧示波器深度 p.npts 仍走缺省（40000）与 pfc_param_limits，不在界面改。
+      <!-- 每帧示波器深度 p.npts 仍走缺省（40000）与 pcd_param_limits，不在界面改。
            实验停表是上面的时长，不是采样点。 -->
     </section>
 
@@ -178,6 +210,11 @@
             <span class="unit">dB</span>
           </div>
           <div class="field">
+            <label title="相对假超声。超过后本发降最大步，不再为 SC 加电压">IC 上限</label>
+            <input type="number" step="0.1" x-model.number="p.ic_limit_db" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
+            <span class="unit">dB</span>
+          </div>
+          <div class="field">
             <label>控制量</label>
             <select x-model="p.ctrl_metric" @change="pushParams(true)" :disabled="busy">
               <option value="2f_window_sum">2f 窗求和</option>
@@ -185,25 +222,21 @@
             </select>
           </div>
           <div class="field">
-            <label>步进</label>
-            <input type="number" step="1" min="1" x-model.number="p.vstep_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
-            <span class="unit">mVpp</span>
-          </div>
-          <div class="field">
             <label>上限</label>
             <input type="number" step="1" x-model.number="p.max_mVpp" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
             <span class="unit">mVpp</span>
           </div>
         </div>
+        <div class="step-warn" x-show="awgMode==='manual'" x-cloak>手动信号源不做闭环。电压在发生器上调，采集用「3 开环」。</div>
         <div class="btns step-btns">
-          <button type="button" @click="action('feedback')" :disabled="busy || !paramsReady">4. 开始闭环</button>
+          <button type="button" @click="action('feedback')" :disabled="busy || !paramsReady || awgMode==='manual'">4. 开始闭环</button>
         </div>
       </div>
 
       <!-- 图表共用一份 live 数据：切页签只改布局，不丢曲线。display:none 的格子切回时要 resizeCharts。 -->
       <div class="chart-grid" :class="tab==='debug' ? 'mode-debug' : 'mode-exp'">
         <div class="chart-cell cell-time-tx">
-          <div class="chart-title" x-text="titles.tx">CH1 时域 · TX</div>
+          <div class="chart-title" x-text="titles.tx">CH1 时域 · 回读</div>
           <div class="chart-box" id="ch-time-tx"></div>
         </div>
         <div class="chart-cell cell-fft-tx">
@@ -227,7 +260,7 @@
           <div class="chart-box" id="ch-sc"></div>
         </div>
         <div class="chart-cell cell-trend cell-ic">
-          <div class="chart-title">惯性空化 <span class="en">IC · 2f–2.5f/底（只监测）</span></div>
+          <div class="chart-title">惯性空化 <span class="en">IC · 超过上限就降电压</span></div>
           <div class="chart-box" id="ch-ic"></div>
         </div>
       </div>
