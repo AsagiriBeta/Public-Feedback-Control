@@ -42,9 +42,15 @@ else
     base_v = v_out;
     v_first = v_out;
 end
-% 触发电平必须低于实际 CH1 峰值（约 Vpp/2）。
+% 触发电平必须低于实际回读峰值（约 Vpp/2）。
+% 触发改接到发生器后面板（另一路）时，电平是 TTL，不用这套毫伏。
 vpp_v = max(v_first, 1) / 1000;
 trig = trig_from_mVpp(v_first);
+ttlTrig = isfield(cfg, 'scope_trig_channel') && cfg.scope_trig_channel >= 1 ...
+    && cfg.scope_trig_channel <= 4 && round(cfg.scope_trig_channel) ~= cfg.scope_tx_channel;
+if ttlTrig
+    trig = 1.5;
+end
 burst_s = p.n_cycle / (p.freq_mhz * 1e6);
 info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle', burst_s);
 % 循环前初值只给第一发（prime）用：按发生器 Vpp 估 CH1，故意偏宽以免 prime 就贴轨。
@@ -53,7 +59,12 @@ scTx  = max(0.001, vpp_v / 1.4);
 scPcd = max(0.001, vpp_v / 1.4);
 writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
 writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
-fprintf('PCD 第一档 %.4g mVpp  触发 %.3g mV  （闭环假超声按 base 设触发，勿用治疗电压）\n', v_first, trig * 1e3);
+if ttlTrig
+    fprintf('PCD 第一档 %.4g mVpp  触发 CH%g 上升沿 %.2f V（发生器后面板，每发一个脉冲）\n', ...
+        v_first, round(cfg.scope_trig_channel), trig);
+else
+    fprintf('PCD 第一档 %.4g mVpp  触发 %.3g mV  （闭环假超声按 base 设触发，勿用治疗电压）\n', v_first, trig * 1e3);
+end
 % CH1 若接在功放前，回读仍是发生器 mVpp，不能当作声压。
 if isfinite(p.amp_gain) && p.amp_gain >= 40
     v_hint = v_out;
@@ -67,7 +78,15 @@ end
 ui.clearTrend();
 
 timeout_s = min(3.0, max(0.9, 3.5 * p.period_s));
-acq_n = p.npts;
+% 两路读同一段：从回读通道上脉冲真正开始的地方起，最长不超过这一发。
+% 内存里脉冲后面不够 6.6 ms 就少读，不把脉冲外面的空档补进来。
+n_req = p.npts;
+if isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
+    n_req = max(256, round(burst_s * info.realFs));
+end
+acq_n = n_req;
+fprintf('两路同一段，最长 %.3f ms（%d 点），不超过脉冲 %.3f ms。\n', ...
+    n_req / max(info.realFs, 1) * 1e3, n_req, burst_s * 1e3);
 datamat = [];
 txmat = [];
 Vrec = [];
@@ -89,6 +108,7 @@ align = struct();% 采集窗对齐自检结果（随数据存盘）
 n_dummy = 0;     % 假超声入库帧数（开环 2/3 为 0）
 t_us = [];       % 第一声超声（发生器 OUTPUT ON）起的墙钟；PRF 空档也算进 duration_s
 us_total = p.duration_s;
+phase_limit_s = inf;   % 假超声单独限时；治疗段改回 inf，只受 duration_s 约束
 sc0 = NaN;
 sc0_pk = NaN;
 ic0 = NaN;
@@ -101,13 +121,16 @@ try
         prefix = ['Sonication_' sanitize_id(p.studyID)];
         ui.status(sprintf('4 闭环  目标 %.1f dB  IC 上限 %.1f dB', p.target_db, p.ic_limit_db));
         fprintf('4 闭环  target_db=%.4g  IC上限 %.4g dB  ctrl=%s\n', p.target_db, p.ic_limit_db, metric);
-        % USB 大约 1 秒一帧。按 5×PRF 会先打半分钟假超声，小鼠总共只有两三分钟。
-        base_n = 8;
+        % 文献 BaselineDuration = 5 s、PRF 2 Hz，5 秒里大约 10 发都进基线。
+        % 这台示波器 USB 大约 1 秒一帧，第一帧还只定量程、不入库。
+        % 15 秒大约能留下 10 帧做中位数，接近他们的 10 发，又不会占掉小鼠那两三分钟。
         % 假超声电压界面可调（base_mVpp）。文献 18 mVpp 是他们探头的 0.2 MPa。
+        dummy_s = 15;
         t_us = start_burst(fgen, p, base_v);
         cd_push();
-        % 假超声仍要凑够基线帧；墙钟到点也会停（倒计时从这一声已经开始）。
-        run_loop(base_n, base_v, false, sprintf('4 假超声基线 %.4g mVpp', base_v));
+        phase_limit_s = dummy_s;
+        run_loop(inf, base_v, false, sprintf('4 假超声基线 %.4g mVpp', base_v));
+        phase_limit_s = inf;
         if pcd_abort
             cd_off();
             result = save_now();
@@ -117,7 +140,7 @@ try
         if n_dummy < 1
             error('pcd:baseline', '基线没有采到有效 CH2 帧。未开始闭环。');
         end
-        i0 = max(1, n_dummy - base_n + 1);
+        i0 = 1;
         % 假超声中位数作 SC0。控哪个量，sc_tgt 就用哪个量 —— 与 Fig.6 蓝线对齐时必须是窗求和。
         sc0_pk = median(PKrec(i0:n_dummy), 'omitnan');
         sc0_sum_med = median(SCrec(i0:n_dummy), 'omitnan');
@@ -205,7 +228,7 @@ result = save_now();
             S.t_elapsed_s = toc(t_us);
         end
         S.RampSC = SCrec;          % 所选谐波 ±20 kHz |FFT| 求和（Fig.6 蓝线）
-        S.RampIC = ICrec;          % 宽带 IC / 参考底（监测）
+        S.RampIC = ICrec;          % 2.2 f0 ±20 kHz 幅度求和（Sun 2022 的 IC）
         S.Peak2f = PKraw;          % SC 窗内 |Y| 峰
         S.SCctrl = PKrec;          % 窗内峰/底
         S.floorY = Flrec;
@@ -217,7 +240,7 @@ result = save_now();
         S.harm_halfwidth_mhz = 0.05;    % 2f 记录窗；旧数据是 0.20，会吞进 2.85 EMI
         cav = pcd_cav_bands(p.freq_mhz * 1e6, p.sc_harm);
         S.sc_band_mhz = cav.sc_mhz;
-        S.ic_band_mhz = cav.ic_bb_mhz;
+        S.ic_band_mhz = cav.ic_ctrl_mhz;
         S.floor_band_mhz = cav.floor_mhz;
         S.freq_MHz = p.freq_mhz;
         S.volt_mVpp = v_out;
@@ -320,7 +343,7 @@ result = save_now();
         acq_mode = 'single';
         n_miss = 0;
         while pcd_visa('alive', token)
-            if us_expired()
+            if us_expired() || dummy_done()
                 break;
             end
             if isfinite(max_pulses) && (n_good - n0) >= max_pulses
@@ -334,42 +357,43 @@ result = save_now();
             % 只在还没有任何有效帧时用倒计时占状态栏。有帧之后改由本发诊断
             % （CH1 是否驱动、2f 真/EMI/底噪）占着，采集等待期间也能看见。
             % 触发失败时保留原因，不要每圈改回「有效 0 帧」，否则像页面死了。
-            if n_good == n0
+            if n_good == n0 || dummy_done_pending()
                 left = remain_us();
+                if dummy_done_pending()
+                    left = max(0, phase_limit_s - toc(t_us));
+                end
                 if ~isempty(wait_note)
-                    ui.status(sprintf('%s  %s  墙钟剩余 %.0f s', label, wait_note, left));
+                    ui.status(sprintf('%s  %s  剩余 %.0f s', label, wait_note, left));
                 elseif isfinite(tgt)
-                    ui.status(sprintf('%s  %d / %d  墙钟剩余 %.0f s', ...
+                    ui.status(sprintf('%s  %d / %d  剩余 %.0f s', ...
                         label, n_good - n0, tgt, left));
                 else
-                    ui.status(sprintf('%s  有效 %d  墙钟剩余 %.0f s', ...
+                    ui.status(sprintf('%s  有效 %d  剩余 %.0f s', ...
                         label, n_good - n0, left));
                 end
             end
             [chPcd, ~, realFs, chTx] = rigol_dho814_acquire_block( ...
-                scope, p.npts, cfg.scope_pcd_channel, acq_mode, timeout_s, ...
-                p.period_s + 0.08);
+                scope, n_req, cfg.scope_pcd_channel, acq_mode, timeout_s, ...
+                p.period_s + 0.08, burst_s);
             if ~pcd_visa('alive', token)
                 break;
             end
             if ~frame_ok(chPcd, chTx)
                 n_miss = n_miss + 1;
                 show_live(chTx, chPcd, realFs, do_fb);
-                if n_miss == 1
-                    trig = 1e-4;  % 0.1 mV：发生器 200 mVpp 时 CH1 常常只有零点几 mV
+                if n_miss == 1 && ~ttlTrig
+                    trig = max(0.01, 0.5 * trig);
                     try
                         writeline(scope, sprintf(':TRIGger:EDGE:LEVel %.8g', trig));
                     catch
                     end
-                    wait_note = sprintf('%s 未触发，电平已降到 %.2f mV', ...
+                    wait_note = sprintf('%s 没等到发生器边沿，电平降到 %.0f mV，仍是单次', ...
                         pcd_scope_labels().txTag, trig * 1e3);
+                elseif ttlTrig
+                    wait_note = sprintf('CH%g 未触发，检查发生器后面板到这一路的 BNC', ...
+                        round(cfg.scope_trig_channel));
                 else
-                    acq_mode = 'live';
-                    try
-                        writeline(scope, ':TRIGger:SWEep AUTO');
-                    catch
-                    end
-                    wait_note = sprintf('%s 仍弱，已改定时采屏（不再空等边沿）', ...
+                    wait_note = sprintf('%s 仍在等发生器这一发，不采空档', ...
                         pcd_scope_labels().txTag);
                 end
                 ui.status(sprintf('%s  %s  墙钟剩余 %.0f s', label, wait_note, remain_us()));
@@ -386,6 +410,9 @@ result = save_now();
             if prime
                 prime = false;
                 n_prime = n_prime + 1;
+                if numel(chTx) >= 256
+                    acq_n = numel(chTx);
+                end
                 [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
                 align = check_burst_window(chTx, info.realFs, p);
                 show_live(chTx, chPcd, info.realFs, do_fb);
@@ -550,11 +577,8 @@ result = save_now();
                     err_raw = 10 * log10(ctrl / sc_tgt);
                 end
                 if ic_hot
-                    % Patel, Schoen, Arvanitis, IEEE TBME, 2019：宽带作 safety switch。
-                    % 超阈值的这一发施加最大负步（与爬升最大步同为 80 mV），
-                    % SC 控制器本发不再加减。下一发若 IC 回到上限以下，SC 继续。
-                    % 原文 PAM 阈值约是基线以上 1%。单通道 PCD 的 1% 落在噪声里，
-                    % 所以判定用 Sun / Chien 的 IC 事件：比假超声高过 ic_limit_db（默认 1 dB）。
+                    % 这一发 IC 窄带比假超声高出上限：电压降 80 mV，SC 本发不动。
+                    % 下一发 IC 回到上限以下，SC 继续。上限默认 1 dB（Sun 2022 的 IC 事件）。
                     n_high = 0;
                     n_low = 0;
                     volt = max(1, volt - 80);
@@ -693,6 +717,15 @@ result = save_now();
         tf = ~isempty(t_us) && isfinite(us_total) && toc(t_us) >= us_total;
     end
 
+    function tf = dummy_done()
+        % 假超声只打 BaselineDuration 那么久，到点就交还给治疗段。
+        tf = dummy_done_pending() && toc(t_us) >= phase_limit_s;
+    end
+
+    function tf = dummy_done_pending()
+        tf = isfinite(phase_limit_s) && ~isempty(t_us);
+    end
+
     function cd_push()
         if ~isfield(ui, 'countdown')
             return;
@@ -758,11 +791,13 @@ scPcd0 = scPcd;
 scTx  = next_scale(scTx,  max(abs(chTx)),  0.001, K_DIV);
 scPcd = next_scale(scPcd, max(abs(chPcd)), 0.002, K_DIV);
 % 本发已贴轨则真实峰值未知（>满量程），再 ×1.5 给重采/下一发。
+% DHO814 竖直最大 10 V/div。以前封在 1 V/div，回读超过约 ±4 V 就每帧削顶、
+% 一帧都不入库，结束时没有波形，分析图也就不画。
 if rigol_dho814_clipped(chTx, scTx0)
-    scTx = min(1.0, 1.5 * scTx);
+    scTx = min(10, 1.5 * scTx);
 end
 if rigol_dho814_clipped(chPcd, scPcd0)
-    scPcd = min(1.0, 1.5 * scPcd);
+    scPcd = min(10, 1.5 * scPcd);
 end
 % 量程几乎没变就不要每发写两次 :CHANnel:SCALe（USB 往返比 FFT 还慢）。
 if abs(scTx - scTx0) / max(scTx0, 1e-6) > 0.08
@@ -775,45 +810,78 @@ end
 
 function sc = next_scale(sc, pk, floor_vdiv, K)
 if isfinite(pk) && pk > 1e-4
-    sc = min(1.0, max(floor_vdiv, pk / K));
+    sc = min(10, max(floor_vdiv, pk / K));
 end
 end
 
 function a = check_burst_window(chTx, fs, p)
 %CHECK_BURST_WINDOW 量一次猝发在采集窗里的位置，偏了就把话说清楚。
-% 窗没对齐是「静默」错误：频谱照样出峰，但 SC/IC 会被占空比稀释（实测差约 11 dB），
-% 而且稀释系数取决于 :TIMebase:MAIN:OFFSet 这个本来不受控的仪器状态。
-% setup 里已把它显式归零，这里量一次结果、随数据存盘，免得以后再靠猜。
+% 窗没对齐是「静默」错误：频谱照样出峰，但 SC/IC 会被占空比稀释（实测差约 11 dB）。
+% 这里量脉冲在窗里实际占了多长，不只看窗的长度。
 a = struct('burst_s', NaN, 'win_s', NaN, 'start_s', NaN, 'in_window', NaN);
 if isempty(chTx) || ~isfinite(fs) || fs <= 0
     return;
 end
 win_s = numel(chTx) / fs;
 burst_s = p.n_cycle / (p.freq_mhz * 1e6);
-env = abs(chTx);
+n0 = max(8, round(0.1e-3 * fs));
+lead = mean(abs(chTx(1:min(numel(chTx), n0))));
+acrms = sqrt(mean((chTx - mean(chTx)) .^ 2));
+if lead > 0.15 && win_s <= burst_s * 1.05
+    a = struct('burst_s', burst_s, 'win_s', win_s, 'start_s', 0, ...
+        'in_window', min(1, win_s / burst_s));
+    if acrms < 0.015
+        fprintf(['采集窗在脉冲里：窗 %.3f ms，开头已经在这一发上。' ...
+            '这段是电平，不是正弦（起伏 %.1f mV）。\n'], ...
+            win_s * 1e3, acrms * 1e3);
+    else
+        fprintf('采集窗在脉冲里：窗 %.3f ms，开头已经在这一发上，脉冲 %.3f ms。\n', ...
+            win_s * 1e3, burst_s * 1e3);
+    end
+    return
+end
+nq = max(8, floor(0.15 * numel(chTx)));
+[~, ord] = sort(abs(chTx(:)));
+base = median(chTx(ord(1:nq)));
+env = abs(chTx - base);
 pk = max(env);
-if ~(pk > 1e-5)
-    fprintf('注意：%s 里找不到猝发（回读幅度过小），无法校验采集窗对齐。\n', pcd_scope_labels().txTag);
+if ~(pk > 0.01)
+    fprintf('注意：%s 几乎是直流（峰峰值 %.2f mV），这一发没有正弦。\n', ...
+        pcd_scope_labels().txTag, (max(chTx) - min(chTx)) * 1e3);
     return;
 end
-start_s = (find(env > 0.25 * pk, 1, 'first') - 1) / fs;
-inside = min(1, max(0, (win_s - start_s) / burst_s));
+i1 = find(env > 0.25 * pk, 1, 'first');
+i2 = find(env > 0.25 * pk, 1, 'last');
+start_s = (i1 - 1) / fs;
+dur_s = (i2 - i1 + 1) / fs;
+inside = min(1, max(0, dur_s / burst_s));
 a = struct('burst_s', burst_s, 'win_s', win_s, 'start_s', start_s, 'in_window', inside);
-if inside < 0.9
-    fprintf(['【采集窗未对齐】猝发 %.3f ms、窗 %.3f ms，猝发从窗内 %.3f ms 才开始，' ...
-        '只有 %.0f%% 在窗内。\n' ...
-        '  SC/IC 会被占空比稀释、标定不稳。setup 已把 :TIMebase:MAIN:OFFSet 归零，' ...
-        '若此处仍偏，说明水平位置还受别的设置影响，需在示波器上确认。\n'], ...
-        burst_s * 1e3, win_s * 1e3, start_s * 1e3, inside * 100);
+% 脉冲一直顶到窗的末尾：窗比脉冲短，但采的是脉冲开头，没有把后面的空档算进去。
+reaches_end = i2 >= numel(chTx) - max(1, round(0.05e-3 * fs));
+if start_s <= 0.3e-3 && win_s <= burst_s * 1.02 && (inside >= 0.9 || reaches_end)
+    fprintf('采集窗在脉冲里：窗 %.3f ms，从 %.3f ms 起，脉冲 %.3f ms（窗内 %.3f ms）。\n', ...
+        win_s * 1e3, start_s * 1e3, burst_s * 1e3, dur_s * 1e3);
 else
-    fprintf('采集窗对齐 OK：猝发 %.3f ms 全部在窗内（起点 %.3f ms，窗 %.3f ms）\n', ...
-        burst_s * 1e3, start_s * 1e3, win_s * 1e3);
+    fprintf(['【采集窗未对齐】脉冲 %.3f ms、窗 %.3f ms，脉冲从 %.3f ms 到 %.3f ms，' ...
+        '窗里只有 %.3f ms（%.0f%%）。\n'], ...
+        burst_s * 1e3, win_s * 1e3, start_s * 1e3, (i2 - 1) / fs * 1e3, ...
+        dur_s * 1e3, inside * 100);
 end
 end
 
 function tf = frame_ok(chPcd, chTx)
-tf = (~isempty(chTx) && numel(chTx) >= 256 && max(abs(chTx)) > 5e-5) || ...
-    (~isempty(chPcd) && numel(chPcd) >= 256 && max(abs(chPcd)) > 5e-5);
+% 回读要能看出这一发：要么在摆（正弦），要么窗里带着电平跳变（猝发闸门）。
+% 纯噪声的峰峰值也能到几十毫伏，不能只看 max-min。整段钉在一个电平上则丢掉。
+tf = false;
+if isempty(chTx) || numel(chTx) < 256
+    return
+end
+swing = max(chTx) - min(chTx);
+acrms = sqrt(mean((chTx - mean(chTx)) .^ 2));
+tf = swing > 0.2 || acrms > 0.02;
+if tf && ~isempty(chPcd) && numel(chPcd) ~= numel(chTx)
+    tf = false;
+end
 end
 
 function k = kind_of(mode)
@@ -845,10 +913,11 @@ end
 end
 
 function t = trig_from_mVpp(mV)
-% CH1 经常远小于发生器 Vpp（弱耦合/功放监视衰减）。旧下限 2 mV、按 12% Vpp
-% 在假超声 200 mVpp 时变成 24 mV，:SINGle 永远等不到，界面停在 0/25。
+% 单次采集要等发生器正弦跨过这个电平才开始记，空档里就停着。
+% 以前上限 0.5 mV，噪声就能触发，窗里经常没有这一发。
+% 取设定 Vpp 的 8%，限制在 15–150 mV：1 Vpp 约 80 mV，200 mVpp 约 16 mV。
 vpp_v = max(mV, 1) / 1000;
-t = max(1e-4, min(0.02 * vpp_v, 5e-4));  % 0.1–0.5 mV
+t = min(0.15, max(0.015, 0.08 * vpp_v));
 end
 
 function mag = adapt_vstep_mV(err_db, want_up, is_ramp)

@@ -19,6 +19,9 @@ F = F(1:n);
 sc = band_sum(Y, F, B.sc_hz, bw_hz);
 sc_peak = band_max(Y, F, B.sc_hz, bw_hz);
 ic_narrow = band_sum(Y, F, B.ic_hz, bw_hz);
+% 闭环 IC 用这条窄带求和，和 SC 一样对假超声取 dB。
+% 宽频平均仍放在 M.ic_bb，不参与调压。
+ic = ic_narrow;
 
 nyq = max(F);
 flo = min(B.floor_lo_hz, 0.90 * nyq);
@@ -42,7 +45,6 @@ end
 ic_lo = min(B.ic_lo_hz, nyq);
 ic_hi = min(B.ic_hi_hz, nyq);
 ic_bb = band_mean(Y, F, ic_lo, ic_hi, B.notch_hz, B.notch_hw_hz);
-ic = ic_bb;
 
 M = struct();
 M.Y_kind = 'abs_fft';
@@ -52,7 +54,8 @@ M.sc_peak = sc_peak;
 M.sc_ctrl = sc_peak / floorY;
 M.ic_narrow_sum = ic_narrow;
 M.ic_bb = ic_bb;
-M.ic_ctrl = ic_bb / floorY;
+M.ic_ctrl = ic_narrow;
+M.ic_mhz = [B.ic_hz - bw_hz, B.ic_hz + bw_hz] / 1e6;
 M.ic_bb_mhz = [ic_lo, ic_hi] / 1e6;
 M.floor_mhz = [flo, fhi] / 1e6;
 M.sc_harm = B.sc_harm;

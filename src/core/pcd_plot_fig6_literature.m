@@ -153,7 +153,7 @@ ylabel(ax3, 'IC (dB)');
 xlabel(ax3, xlab);
 xlim(ax3, [xL xR]);
 shade_dummy_x(ax3, xx, n_dummy, tmode);
-title(ax3, 'IC  2f–2.5f / 底');
+title(ax3, 'IC  2.2f \pm20 kHz');
 legend(ax3, h_ic, sprintf('10 log_{10}(IC/IC_0),  IC_0=%.4g', ic0), ...
     'Location', 'best');
 set(ax3, 'FontSize', 9, 'FontWeight', 'bold', 'Box', 'on');

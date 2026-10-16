@@ -45,7 +45,12 @@ try
     if ~L.manual
         rigol_dg2052_output_set(fgen, true);
     end
-    [chA, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, depth, cfg.scope_pcd_channel);
+    n_req = depth;
+    if isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
+        n_req = max(256, round(burst_s * info.realFs));
+    end
+    [chA, dt_ns, realFs, chTx] = rigol_dho814_acquire_block( ...
+        scope, n_req, cfg.scope_pcd_channel, 'single', [], [], burst_s);
     if ~L.manual
         rigol_dg2052_output_set(fgen, false);
     end
