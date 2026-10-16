@@ -1,7 +1,12 @@
-function [chPcd, timeIntervalNanoSeconds, realFs, chTx] = rigol_dho814_acquire_block(dev, npts, ch, mode, timeout_s, live_wait_s, burst_s)
+function [chPcd, timeIntervalNanoSeconds, realFs, chTx, okTx, lead_s] = rigol_dho814_acquire_block(dev, npts, ch, mode, timeout_s, live_wait_s, burst_s)
 %RIGOL_DHO814_ACQUIRE_BLOCK
 % 'single'：等 CH1 边沿后读 RAW。触发超时则 STOP 后仍读一屏。
 % 'live'：RUN 约一个 PRF 再 STOP 读（CH1 太弱、边沿触发空等时用）。
+%
+% npts 是这一发要用来做频谱的**精确点数**（= rigol_dho814_capture_geometry 的 acq_n），
+% 不是「最多多少点」：第 5 个输出 okTx 说明回读通道这一帧是否读到了。
+% 回读是诊断用的，它毛刺不该把完好的 PCD 帧一起丢掉 —— 调用方按 okTx 决定要不要
+% 只用 PCD，而不是因为 chTx 为空就把整帧判废。
 cfg = rigol_instr_config();
 if nargin < 3 || isempty(ch)
     ch = cfg.scope_pcd_channel;
@@ -31,6 +36,7 @@ end
 chPcd = [];
 chTx = [];
 xinc = NaN;
+lead_s = NaN;   % 先占住：里面有多处提前 return，不留到 catch 才算未定义
 try
     if strcmpi(mode, 'live')
         % RAW 只能在 STOP 后读。调试若只 STOP 不 RUN，第一帧用的是 setup 里
@@ -111,7 +117,28 @@ try
     if ~(isfinite(xorigin)) && isfinite(xo2)
         xorigin = xo2;
     end
-    [chTx, chPcd] = crop_same(chTx, chPcd, xorigin, xinc, npts, burst_s);
+    % 记录开头到这一发真正起点之间有多长空档（秒）。它就是 rigol_instr_config.scope_lead_s
+    % 该填的值：这台机器 XORigin 会落在跳变前 1–3 ms，留不够就会把猝发尾部切掉。
+    % 报回给调用方去校准，别让这个数一直靠猜。
+    lead_s = NaN;
+    if ~isempty(chTx) && isfinite(xinc) && xinc > 0
+        [s0, ~] = signal_span(chTx, xinc);
+        if ~isempty(s0)
+            lead_s = (s0 - 1) * xinc;
+        end
+    end
+    if isempty(chTx) && ~isempty(chPcd)
+        % 回读这一路读失败（read_raw 吞掉异常返回 []）。PCD 是我们要测的那一路，
+        % 不能因为诊断通道毛刺就丢帧：只裁 PCD，okTx=false 交给调用方判断。
+        [~, chPcd] = crop_same(chTx, chPcd, xorigin, xinc, npts, burst_s);
+    elseif fixed_crop_ok(chTx, xinc, npts)
+        % 定点裁剪：从回读上这一发真正开始的样点起，取满 npts 点。
+        % 改之前用 crop_same「包络到哪算哪」，同一物理量每帧长度都在变，
+        % 而频谱未归一化 → SC 直接跟着帧长抖。
+        [chTx, chPcd] = crop_fixed(chTx, chPcd, xinc, npts);
+    else
+        [chTx, chPcd] = crop_same(chTx, chPcd, xorigin, xinc, npts, burst_s);
+    end
     if strcmpi(mode, 'live')
         % 读完重新跑起来，示波器屏幕才不会冻住，下一圈 :RUN 也有新数据可停。
         try, writeline(dev, ':RUN'); catch, end
@@ -124,9 +151,52 @@ end
 if ~(isfinite(xinc) && xinc > 0)
     xinc = 1 / 40e6;
 end
+okTx = ~isempty(chTx);
 realFs = 1 / xinc;
 timeIntervalNanoSeconds = xinc * 1e9;
 restore_timeout(dev, oldT);
+end
+
+function tf = fixed_crop_ok(a, xinc, want_n)
+%FIXED_CROP_OK 能不能定点裁剪：要能在回读上找到这一发的起点，且记录里够长。
+% 找不到就退回 crop_same —— 定点裁剪的前提是「知道 t0 在哪」，不知道就别硬来。
+tf = false;
+if isempty(a) || ~(isfinite(xinc) && xinc > 0)
+    return
+end
+if ~(isfinite(want_n) && want_n >= 256)
+    return
+end
+[i0, ~] = signal_span(a, xinc);
+tf = ~isempty(i0) && i0 + want_n - 1 <= numel(a);
+end
+
+function [a, b] = crop_fixed(a, b, xinc, want_n)
+%CROP_FIXED 定点裁剪：从回读上这一发真正开始的样点起，取满 want_n 点。
+%
+% 起点用 signal_span 在数据里找发射沿，与 crop_same 用同一个判据；
+% 但终点不再「包络到哪算哪」，而是取满 want_n —— want_n = burst_s × fs 由
+% rigol_dho814_capture_geometry 一次定死，所以同一物理量每帧长度完全一致。
+% 改之前长度随包络检测抖动，而 pcd_spectrum 未做长度归一化，SC 就跟着抖。
+n = max(numel(a), numel(b));
+if n < 256
+    return
+end
+[i0, ~] = signal_span(a, xinc);
+if isempty(i0)
+    return
+end
+i0 = min(max(1, i0), max(1, n - 255));
+last = min(n, i0 + want_n - 1);
+if last - i0 + 1 < 256
+    return
+end
+if numel(a) >= last
+    a = a(i0:last);
+end
+if numel(b) >= last
+    b = b(i0:last);
+end
 end
 
 function [a, b] = crop_same(a, b, xorigin, xinc, npts, burst_s)

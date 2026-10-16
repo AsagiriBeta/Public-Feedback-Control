@@ -37,7 +37,7 @@ end
 
 scope = rigol_dho814_open();
 burst_s = cycle / (freq * 1e6);
-info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel, trig, 'SINGle', burst_s);
+info = rigol_dho814_setup(scope, Fs, depth, cfg.scope_channel, trig, 'SINGle', burst_s, freq * 1e6);
 if ~L.manual
     fgen_excute_UTSW(freq, volt, 0, cycle, 1 / PRF);
 end
@@ -46,7 +46,10 @@ try
         rigol_dg2052_output_set(fgen, true);
     end
     n_req = depth;
-    if isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
+    if isfield(info, 'geom_ok') && info.geom_ok && isfinite(info.acq_n) && info.acq_n >= 256
+        % 与 2/3/4 同一套几何：分析长度由「猝发长度 × fs」定，不由某一帧的裁剪结果定。
+        n_req = round(info.acq_n);
+    elseif isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
         n_req = max(256, round(burst_s * info.realFs));
     end
     [chA, dt_ns, realFs, chTx] = rigol_dho814_acquire_block( ...

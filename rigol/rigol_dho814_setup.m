@@ -1,4 +1,4 @@
-function info = rigol_dho814_setup(dev, targetFs, npts, ~, trigLevel, sweep, burst_s)
+function info = rigol_dho814_setup(dev, targetFs, npts, ~, trigLevel, sweep, burst_s, f0_hz)
 %RIGOL_DHO814_SETUP 打开回读通道 + PCD 通道（通道号在仪器配置里，不写死 CH1/CH2）。
 % sweep: 'SINGle' 闭环逐发对齐；'AUTO' 调试时屏幕保持滚动。
 cfg = rigol_instr_config();
@@ -30,17 +30,45 @@ end
 % 清掉上一轮留在屏幕上的远程指令错误。
 try, writeline(dev, '*CLS'); catch, end
 
-% 先把存储深度降到两通道都合法的档，再开通道。DHO814 单通道可以停在 25M，
-% 这时再打开第二路，示波器会报远程指令错误。
-safeMd = rigol_dho814_pick_mdepth(npts);
-if strcmp(safeMd, '25M')
-    safeMd = '10M';
+% 采集几何：由「猝发长度 + 分析频带 + 传输预算」反推深度档与时基，不写死 npts/40e6。
+% 改之前 scale = (npts/targetFs)/10，记录长度与这一发多长无关：猝发 0.27 ms 时
+% 窗口里 3.7 倍是空档（signal_span 得在空档里找包络，acq_n 逐帧抖），猝发 6.6 ms
+% 时窗根本装不下、静默截断。而 realFs = 深度档/记录长度 = 100k/1ms = 100 MSa/s，
+% 比设计的 40 MSa/s 多采 2.5 倍。详见 rigol_dho814_capture_geometry。
+geom = [];
+if nargin < 8 || isempty(f0_hz) || ~isfinite(f0_hz) || f0_hz <= 0
+    f0_hz = 1.5e6;   % 与 pcd_cav_bands 的默认一致
 end
-safeScale = (npts / targetFs) / 10;
-% 时基和内存用原来能采的档。1M 内存和数毫秒的时基偏移这台示波器会拒绝，
-% 屏幕就挂「远程指令错误」，而且每次都会退回这一档。
-mdTag = safeMd;
-scale = safeScale;
+try
+    L = pcd_param_limits();
+    npts_max = L.npts_max;
+catch
+    npts_max = 1e5;
+end
+lead_s = 3e-3;
+if isfield(cfg, 'scope_lead_s') && isnumeric(cfg.scope_lead_s) && isfinite(cfg.scope_lead_s) && cfg.scope_lead_s >= 0
+    lead_s = double(cfg.scope_lead_s);
+end
+
+if isfinite(burst_s) && burst_s > 0
+    geom = rigol_dho814_capture_geometry(burst_s, f0_hz, targetFs, npts, npts_max, lead_s);
+    if ~geom.ok
+        error('rigol:dho814:geometry', '%s', geom.reason);
+    end
+end
+
+if isempty(geom)
+    % 没有猝发长度（CW 调试 / 单次看波形）：沿用旧的 npts/targetFs 定标，不改调试路径行为。
+    mdTag = rigol_dho814_pick_mdepth(npts);
+    if strcmp(mdTag, '25M')
+        mdTag = '10M';
+    end
+    scale = (npts / targetFs) / 10;
+else
+    mdTag = geom.depth_tag;
+    scale = geom.scale_s_per_div;
+end
+% 时基偏移保持 0：这台固件的 1M 内存和数毫秒的时基偏移会拒绝，屏幕挂「远程指令错误」。
 writeline(dev, [':ACQuire:MDEPth ' mdTag]);
 
 % 只打开要用的两路，不要 DISPlay OFF。触发源还停在旧通道（常常是坏掉的 CH1）时，
@@ -109,6 +137,26 @@ info.scope_trig_channel = trigCh;
 % 回读实际生效的水平偏移，随数据一起存下去 —— 采集窗对齐情况要能事后追溯
 info.time_offset_s = qnum(dev, ':TIMebase:MAIN:OFFSet?');
 info.waveform_format = 'WORD';
+% 采集几何留档：acq_n 是「这一发本身」的点数（burst_s × fs），每帧固定，
+% 不再由某一帧的裁剪结果决定 —— 频谱幅值不随帧长抖动就靠它。
+if isempty(geom)
+    info.geom_ok = false;
+    info.depth_tag = mdTag;
+    info.record_s = 10 * scale;
+    info.acq_n = NaN;
+    info.fs_planned = NaN;
+else
+    info.geom_ok = true;
+    info.depth_tag = geom.depth_tag;
+    info.record_s = geom.record_s;
+    info.acq_n = geom.acq_n;
+    info.fs_planned = geom.fs;
+    info.fs_target = geom.fs_target;
+    info.fs_min = geom.fs_min;
+    info.nyquist_margin = geom.nyquist_hz / geom.band_max_hz;
+    info.transfer_bytes = geom.transfer_bytes;
+    info.geom_note = geom.note;
+end
 end
 
 function v = qnum(dev, cmd)

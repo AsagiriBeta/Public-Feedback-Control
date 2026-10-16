@@ -17,6 +17,10 @@ pcd_abort = false;
 token = pcd_visa('token');
 
 mode = lower(char(mode));
+lead_cfg = 3e-3;
+if isfield(cfg, 'scope_lead_s') && isnumeric(cfg.scope_lead_s) && isfinite(cfg.scope_lead_s) && cfg.scope_lead_s >= 0
+    lead_cfg = double(cfg.scope_lead_s);
+end
 L = pcd_scope_labels();
 if L.manual && any(strcmp(mode, {'during', 'feedback'}))
     error('pcd:awg:manual', ...
@@ -51,8 +55,11 @@ ttlTrig = isfield(cfg, 'scope_trig_channel') && cfg.scope_trig_channel >= 1 ...
 if ttlTrig
     trig = 1.5;
 end
+trig0 = trig;   % 触发电平的起始值，做「降档下限」用（见 run_loop 里的失败处理）
 burst_s = p.n_cycle / (p.freq_mhz * 1e6);
-info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle', burst_s);
+% 第 8 个参数是 f0：rigol_dho814_capture_geometry 要用它算采样率下限
+% （pcd_cav_bands 的参考底带到 3.87×f0，低于 Nyquist 就会静默退化成单 bin）。
+info = rigol_dho814_setup(scope, p.fs_target, p.npts, cfg.scope_pcd_channel, trig, 'SINGle', burst_s, p.freq_mhz * 1e6);
 % 循环前初值只给第一发（prime）用：按发生器 Vpp 估 CH1，故意偏宽以免 prime 就贴轨。
 % 有效帧的量程由 set_ranges 的 K_DIV=1.0（4×余量）按实测峰值更新；prime 帧不入库。
 scTx  = max(0.001, vpp_v / 1.4);
@@ -78,15 +85,39 @@ end
 ui.clearTrend();
 
 timeout_s = min(3.0, max(0.9, 3.5 * p.period_s));
-% 两路读同一段：从回读通道上脉冲真正开始的地方起，最长不超过这一发。
-% 内存里脉冲后面不够 6.6 ms 就少读，不把脉冲外面的空档补进来。
+% 分析长度 acq_n = 这一发本身的点数，由 rigol_dho814_capture_geometry 一次定死
+% （burst_s × fs）。改之前它取自 prime 那一帧的裁剪结果、整轮不再变，于是后续帧
+% 长度不足就补零，而频谱未归一化 → SC 与本帧实际长度线性相关，帧间不可比。
 n_req = p.npts;
-if isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
-    n_req = max(256, round(burst_s * info.realFs));
-end
 acq_n = n_req;
-fprintf('两路同一段，最长 %.3f ms（%d 点），不超过脉冲 %.3f ms。\n', ...
-    n_req / max(info.realFs, 1) * 1e3, n_req, burst_s * 1e3);
+if isfield(info, 'geom_ok') && info.geom_ok && isfinite(info.acq_n) && info.acq_n >= 256
+    acq_n = round(info.acq_n);
+    n_req = acq_n;
+elseif isfinite(info.realFs) && info.realFs > 0 && burst_s > 0
+    % 没有几何信息（CW 调试 / 单次）时沿用旧口径
+    n_req = max(256, round(burst_s * info.realFs));
+    acq_n = n_req;
+end
+if isfield(info, 'geom_ok') && info.geom_ok
+    fprintf(['采集几何：深度 %s  记录 %.3f ms  fs %.3f MSa/s（目标 %.3g，下限 %.3g）  ' ...
+        '这一发 %.3f ms → %d 点  每帧传输 %.0f KB  Nyquist 余量 %.2f×\n'], ...
+        info.depth_tag, info.record_s * 1e3, info.fs_planned / 1e6, ...
+        info.fs_target / 1e6, info.fs_min / 1e6, burst_s * 1e3, acq_n, ...
+        info.transfer_bytes / 1024, info.nyquist_margin);
+    if ~isempty(info.geom_note)
+        fprintf('  %s\n', info.geom_note);
+    end
+    if info.nyquist_margin < 1.15
+        warning('pcd:geometry:nyquist', ...
+            ['Nyquist 相对 %.2f MHz 的参考底带只剩 %.2f× 余量。' ...
+             '再低就会让 pcd_band_energy 把频带 clamp 到 Nyquist、退化成单 bin，' ...
+             '而且不会报错。请提高 npts 上限、缩短猝发或降低 f0。'], ...
+            3.87 * p.freq_mhz, info.nyquist_margin);
+    end
+else
+    fprintf('两路同一段，最长 %.3f ms（%d 点），不超过脉冲 %.3f ms。\n', ...
+        n_req / max(info.realFs, 1) * 1e3, n_req, burst_s * 1e3);
+end
 datamat = [];
 txmat = [];
 Vrec = [];
@@ -98,6 +129,7 @@ PKraw = [];   % 2f 窗内 |Y| 峰值（存档）
 Flrec = [];   % 参考底 |Y|
 peaks_ch1 = [];
 harm_db = [];
+lead_max = 0;   % 实测「记录开头到这一发起点」的最长空档，用来校准 scope_lead_s
 pulse = 0;
 save_path = '';
 n_good = 0;
@@ -213,6 +245,7 @@ result = save_now();
         end
         ui.status(msg);
         fprintf('%s\n', msg);
+        report_lead(lead_max, lead_cfg);
     end
 
     function S = pack_save()
@@ -372,26 +405,39 @@ result = save_now();
                         label, n_good - n0, left));
                 end
             end
-            [chPcd, ~, realFs, chTx] = rigol_dho814_acquire_block( ...
+            [chPcd, ~, realFs, chTx, okTx, leadFrame] = rigol_dho814_acquire_block( ...
                 scope, n_req, cfg.scope_pcd_channel, acq_mode, timeout_s, ...
                 p.period_s + 0.08, burst_s);
             if ~pcd_visa('alive', token)
                 break;
             end
-            if ~frame_ok(chPcd, chTx)
+            if isfinite(leadFrame)
+                lead_max = max(lead_max, leadFrame);
+            end
+            if ~frame_ok(chPcd, chTx, okTx, volt)
                 n_miss = n_miss + 1;
                 show_live(chTx, chPcd, realFs, do_fb);
-                if n_miss == 1 && ~ttlTrig
-                    trig = max(0.01, 0.5 * trig);
+                % 触发电平只按「连续」失败降档，且设下限。改之前 n_miss==1 就降一半，
+                % 而 n_miss 在任何成功帧后清零 —— 于是「成功一帧、失败一帧」交替时
+                % 电平一路棘轮到 10 µV，之后噪声在 PRF 空档里就能触发示波器，
+                % 采到纯空档、再判失败，实验就废在自我强化的循环里。
+                % 下限取该档触发电平的 1/4，不再低于噪声可能触发的水平。
+                if n_miss == 3 && ~ttlTrig && trig > 0.25 * trig0
+                    trig = max(0.25 * trig0, 0.5 * trig);
                     try
                         writeline(scope, sprintf(':TRIGger:EDGE:LEVel %.8g', trig));
                     catch
                     end
-                    wait_note = sprintf('%s 没等到发生器边沿，电平降到 %.0f mV，仍是单次', ...
-                        pcd_scope_labels().txTag, trig * 1e3);
+                    wait_note = sprintf('%s 连续三发没等到边沿，电平降到 %.0f mV（下限 %.0f mV），仍是单次', ...
+                        pcd_scope_labels().txTag, trig * 1e3, 0.25 * trig0 * 1e3);
                 elseif ttlTrig
                     wait_note = sprintf('CH%g 未触发，检查发生器后面板到这一路的 BNC', ...
                         round(cfg.scope_trig_channel));
+                elseif ~okTx
+                    % 回读读失败就丢这一帧 —— 不是嫌它数据脏，而是裁窗锚在回读检测到的
+                    % 发射沿上，没有锚点 PCD 的窗就是任意的，入库等于写进错窗的占空比。
+                    wait_note = sprintf('%s 这一帧没读到（USB 毛刺），缺少发射沿锚点，本帧丢弃', ...
+                        pcd_scope_labels().txTag);
                 else
                     wait_note = sprintf('%s 仍在等发生器这一发，不采空档', ...
                         pcd_scope_labels().txTag);
@@ -410,9 +456,9 @@ result = save_now();
             if prime
                 prime = false;
                 n_prime = n_prime + 1;
-                if numel(chTx) >= 256
-                    acq_n = numel(chTx);
-                end
+                % 这里**不再**改 acq_n。改之前 acq_n = numel(chTx) 只在这一帧定一次，
+                % 后续帧长度不足就补零，而频谱未归一化 → 整轮 SC 被这一帧的裁剪长度
+                % 定标，且帧间不可比。现在 acq_n 来自采集几何，与帧无关。
                 [scTx, scPcd] = set_ranges(scope, cfg, chTx, chPcd, scTx, scPcd);
                 align = check_burst_window(chTx, info.realFs, p);
                 show_live(chTx, chPcd, info.realFs, do_fb);
@@ -869,17 +915,42 @@ else
 end
 end
 
-function tf = frame_ok(chPcd, chTx)
-% 回读要能看出这一发：要么在摆（正弦），要么窗里带着电平跳变（猝发闸门）。
-% 纯噪声的峰峰值也能到几十毫伏，不能只看 max-min。整段钉在一个电平上则丢掉。
-tf = false;
+function tf = frame_ok(chPcd, chTx, okTx, volt_mVpp)
+%FRAME_OK 这一帧能不能入库。判据是**相对本发电压**的，不是绝对毫伏。
+%
+% 改之前是 swing > 0.2（200 mVpp）|| acrms > 0.02（20 mVrms），与这一发实际打多大
+% 无关。正弦 acrms = Vpp/2√2，所以回读低于 ≈56.6 mVpp 就恒判 false —— 而假超声档
+% 本来就设计成低电压（代码注释里把文献的 18 mVpp 当合法工作点）。后果：整轮 0 帧，
+% 最后抛「基线没有采到有效 CH2 帧」，错误信息指不到真因。
+%
+% 现在：门限 = 本发电压的一个小比例，并保留绝对下限防止 volt 未知时退化成
+% 「有噪声就算过」。
+%
+% 回读读失败时仍然丢帧 —— 不是因为它「数据脏」，而是因为**没有回读就没有猝发起点**：
+% 裁窗锚在回读检测到的发射沿上（crop_fixed / crop_same），丢了锚点 PCD 的窗就是
+% 任意的，入库等于把错窗的占空比写进 SC。所以这里丢帧是对的，真正要修的是别因为
+% 单帧失败就把触发电平棘轮下去（见 run_loop）。
+if isempty(chPcd) || numel(chPcd) < 256
+    tf = false;
+    return
+end
+if nargin >= 3 && ~okTx
+    tf = false;
+    return
+end
+if nargin < 4 || ~(isscalar(volt_mVpp) && isfinite(volt_mVpp) && volt_mVpp > 0)
+    volt_mVpp = 0;
+end
 if isempty(chTx) || numel(chTx) < 256
+    tf = false;
     return
 end
 swing = max(chTx) - min(chTx);
 acrms = sqrt(mean((chTx - mean(chTx)) .^ 2));
-tf = swing > 0.2 || acrms > 0.02;
-if tf && ~isempty(chPcd) && numel(chPcd) ~= numel(chTx)
+% 相对门限：本发 Vpp 的 10%（acrms 口径）；volt 未知时退回原来的绝对下限。
+floor_v = max(0.002, 0.10 * volt_mVpp / 1000);
+tf = swing > 0.2 * max(volt_mVpp / 1000, 0.02) || acrms > floor_v;
+if tf && numel(chPcd) ~= numel(chTx)
     tf = false;
 end
 end
@@ -910,6 +981,23 @@ if ~any(m)
 else
     dbp = max(db(m));
 end
+end
+
+function report_lead(lead_max, lead_cfg)
+%REPORT_LEAD 把实测的「记录开头到这一发起点」空档报出来，用来校准 scope_lead_s。
+%
+% 这个数直接决定采样率：rigol_dho814_capture_geometry 要按它给记录留余量，
+% 留得越多、装下这一发需要的点数越多、fs 越低。默认 3e-3 是照注释里「1–3 ms」
+% 的实测上界保守取的；实测值更小就调小 rigol_config.ini 里的 scope_lead_s，fs 会回升。
+% 不报出来这个数就只能一直靠猜，而它一个数量级的差别能决定 6.6 ms 的窗装不装得下。
+if ~isfinite(lead_max) || lead_max <= 0
+    return
+end
+fprintf(['实测前置空档最长 %.3f ms（记录开头到这一发起点）。\n' ...
+    '  当前 scope_lead_s = %.3f ms。若实测明显更小，把它改小可提高采样率：' ...
+    'rigol_config.ini 里 scope_lead_s=%.6g，或在 MATLAB 里 ' ...
+    'cfg = rigol_instr_config(); cfg.scope_lead_s = %.6g; rigol_instr_config(''save'', cfg);\n'], ...
+    lead_max * 1e3, lead_cfg * 1e3, max(1.2 * lead_max, 0.2e-3), max(1.2 * lead_max, 0.2e-3));
 end
 
 function t = trig_from_mVpp(mV)
