@@ -210,7 +210,7 @@
             <span class="unit">dB</span>
           </div>
           <div class="field">
-            <label title="相对假超声。超过后本发降最大步，不再为 SC 加电压">IC 上限</label>
+            <label title="1.5 MHz 时看 3.30±0.02 MHz。比假超声高过这个数，本发降 80 mV">IC 上限</label>
             <input type="number" step="0.1" x-model.number="p.ic_limit_db" @input="pushParams(false)" @change="pushParams(true)" :disabled="busy">
             <span class="unit">dB</span>
           </div>
@@ -260,7 +260,7 @@
           <div class="chart-box" id="ch-sc"></div>
         </div>
         <div class="chart-cell cell-trend cell-ic">
-          <div class="chart-title">惯性空化 <span class="en">IC · 超过上限就降电压</span></div>
+          <div class="chart-title">惯性空化 <span class="en">IC · 3.30±0.02 MHz，超过上限降电压</span></div>
           <div class="chart-box" id="ch-ic"></div>
         </div>
       </div>

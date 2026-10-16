@@ -26,7 +26,17 @@ nc = min(nc, L.n_cycle_max);
 pl = nc / freq_hz;
 period_s = max(period_s, pl + 50e-6);
 
-writeline(dev, sprintf(':%s:BURSt:TRIGger:SOURce INTernal', src));
+% 这台固件查询触发源可以得到 INT，但再写一次 INTernal/INT 会 -220，数值并不变。
+% 外触发时后面板是输入，不会给出每发一个脉冲。
+srcNow = upper(strtrim(char(writeread(dev, sprintf(':%s:BURSt:TRIGger:SOURce?', src)))));
+if startsWith(srcNow, 'EXT')
+    error('rigol:dg2052:trigsrc', ...
+        ['猝发触发源是外触发，后面板不会输出脉冲。' ...
+         '这条设置指令仪器不接受，请在发生器上改成 Internal。']);
+end
+% 后面板 [CHn/Sync/Ext Mod/Trig/FSK] 的 Trig Out 出厂是 OFF。
+% 远程时面板改不了。POSitive = 每个猝发一个上升沿。
+writeline(dev, sprintf(':%s:BURSt:TRIGger:TRIGOut POSitive', src));
 writeline(dev, sprintf(':%s:BURSt:NCYCles %d', src, nc));
 pause(0.05);
 writeline(dev, sprintf(':%s:BURSt:INTernal:PERiod %.12g', src, period_s));
@@ -40,5 +50,10 @@ if ~(isfinite(nc_rd) && abs(nc_rd - nc) < 1)
 end
 if ~(isfinite(per_rd) && abs(per_rd - period_s) / period_s < 0.05)
     warning('rigol:dg2052:period', '猝发周期回读 %.4g s（设定 %.4g s）', per_rd, period_s);
+end
+sl = strtrim(char(writeread(dev, sprintf(':%s:BURSt:TRIGger:TRIGOut?', src))));
+if ~startsWith(upper(sl), 'POS')
+    error('rigol:dg2052:trigout', ...
+        '猝发触发输出未能设为上升沿（回读 %s）。后面板不会给出每发一次的脉冲。', sl);
 end
 end

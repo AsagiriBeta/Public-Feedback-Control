@@ -380,7 +380,7 @@ if n_dummy >= 1 && use_db && (~isempty(sc_sum) || ~isempty(sc)) && ~isempty(ic)
     ylabel(ax, 'IC (dB re dummy)');
     xlabel(ax, xlab);
     xlim(ax, [xL xR]);
-    legend(ax, {'IC  (2f–2.5f mean / floor)'}, 'Location', 'best');
+    legend(ax, {'IC  (2.2f \pm20 kHz 求和)'}, 'Location', 'best');
     return;
 end
 if ~isempty(sc) || ~isempty(ic)
