@@ -277,10 +277,18 @@ ac = abs(y(:) - base);
 c = cumsum([0; ac]);
 ma = (c((1 + win):end) - c(1:(end - win))) / win;
 pk = max(ma);
-if ~(isfinite(pk) && pk >= 0.02)
+% 门限必须是**相对**的：ma 是 20 µs 滑动平均，正弦包络只有幅度的 ~2/π。
+% 实测 98 mVpp（峰 49 mV）的信号，ma 峰值只有 30.9 mV —— 原来那道
+% `max(0.05, …)` 的绝对 50 mV 门槛是它的 1.6 倍，于是永远判「找不到猝发」：
+% crop_fixed 一次都不命中（crop_mode 恒为 'span'）、lead 恒为 NaN，
+% 65 mVpp 以下的信号更是连 pk>=0.02 都过不去。
+% 现在用空档里的典型起伏 nz = median(ac) 当噪声底：真猝发的 pk/nz 实测约 130 倍，
+% 纯噪声只有 1 倍出头，所以 6× 既能挡住噪声，又不对幅度设死板下限。
+nz = median(ac);
+if ~(isfinite(pk) && isfinite(nz) && pk >= max(0.002, 6 * nz))
     return
 end
-ks = find(ma > max(0.05, 0.4 * pk));
+ks = find(ma > max(6 * nz, 0.4 * pk));
 if isempty(ks)
     return
 end
