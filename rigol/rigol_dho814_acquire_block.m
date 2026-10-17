@@ -1,4 +1,4 @@
-function [chPcd, timeIntervalNanoSeconds, realFs, chTx, okTx, lead_s] = rigol_dho814_acquire_block(dev, npts, ch, mode, timeout_s, live_wait_s, burst_s)
+function [chPcd, timeIntervalNanoSeconds, realFs, chTx, okTx, lead_s, crop_mode] = rigol_dho814_acquire_block(dev, npts, ch, mode, timeout_s, live_wait_s, burst_s)
 %RIGOL_DHO814_ACQUIRE_BLOCK
 % 'single'：等 CH1 边沿后读 RAW。触发超时则 STOP 后仍读一屏。
 % 'live'：RUN 约一个 PRF 再 STOP 读（CH1 太弱、边沿触发空等时用）。
@@ -37,6 +37,10 @@ chPcd = [];
 chTx = [];
 xinc = NaN;
 lead_s = NaN;   % 先占住：里面有多处提前 return，不留到 catch 才算未定义
+% 这一帧用的是哪条裁剪路径。'fixed' 才代表「从发射沿起取满 acq_n 点」，
+% 退回 'span' 就是旧的「包络到哪算哪」。不报出来就只能靠长度反推，而
+% 两条路径在多数情况下点数相同（都被 npts 夹住），根本分不开。
+crop_mode = 'none';
 try
     if strcmpi(mode, 'live')
         % RAW 只能在 STOP 后读。调试若只 STOP 不 RUN，第一帧用的是 setup 里
@@ -117,9 +121,9 @@ try
     if ~(isfinite(xorigin)) && isfinite(xo2)
         xorigin = xo2;
     end
-    % 记录开头到这一发真正起点之间有多长空档（秒）。它就是 rigol_instr_config.scope_lead_s
-    % 该填的值：这台机器 XORigin 会落在跳变前 1–3 ms，留不够就会把猝发尾部切掉。
-    % 报回给调用方去校准，别让这个数一直靠猜。
+    % 记录开头到这一发真正起点之间有多长空档（秒）。记录长度的一半恒定在触发之前
+    % （XORigin ≡ -记录/2），所以这个数用来说明「触发点相对这一发在哪儿」，
+    % 只作诊断，不参与几何决策。
     lead_s = NaN;
     if ~isempty(chTx) && isfinite(xinc) && xinc > 0
         [s0, ~] = signal_span(chTx, xinc);
@@ -131,13 +135,16 @@ try
         % 回读这一路读失败（read_raw 吞掉异常返回 []）。PCD 是我们要测的那一路，
         % 不能因为诊断通道毛刺就丢帧：只裁 PCD，okTx=false 交给调用方判断。
         [~, chPcd] = crop_same(chTx, chPcd, xorigin, xinc, npts, burst_s);
+        crop_mode = 'no-tx';
     elseif fixed_crop_ok(chTx, xinc, npts)
         % 定点裁剪：从回读上这一发真正开始的样点起，取满 npts 点。
         % 改之前用 crop_same「包络到哪算哪」，同一物理量每帧长度都在变，
         % 而频谱未归一化 → SC 直接跟着帧长抖。
         [chTx, chPcd] = crop_fixed(chTx, chPcd, xinc, npts);
+        crop_mode = 'fixed';
     else
         [chTx, chPcd] = crop_same(chTx, chPcd, xorigin, xinc, npts, burst_s);
+        crop_mode = 'span';
     end
     if strcmpi(mode, 'live')
         % 读完重新跑起来，示波器屏幕才不会冻住，下一圈 :RUN 也有新数据可停。
@@ -146,6 +153,7 @@ try
 catch
     chPcd = [];
     chTx = [];
+    crop_mode = 'error';
 end
 
 if ~(isfinite(xinc) && xinc > 0)
