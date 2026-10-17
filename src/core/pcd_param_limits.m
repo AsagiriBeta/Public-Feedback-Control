@@ -34,7 +34,14 @@ function L = pcd_param_limits()
 % 旧注释写的「100k 点 @ 12.5 MSa/s ≈ 8 ms 窗」是错的：100k 档配 8 ms 记录时
 % fs 只有 12.5 MSa/s，而记录长度本来就不该由 npts 决定。窗能不能装下这一发，
 % 现在由 rigol_dho814_capture_geometry 判定并在装不下时报错，不再静默截断。
+% wf_max_bytes 是**单通道一次波形块**能读回来的上限，rigol_read_ieee_block_binary
+% 用它校验 IEEE 块长度，rigol_dho814_capture_geometry 用它封顶深度档 —— 两处必须同一个数。
+% 为什么现在必须显式关联：深度档 1M 时单通道 WORD = 2,000,000 字节，正好压在这个上限上；
+% 再往上（5M/10M 档）每帧波形读都会失败，帧被静默丢弃，最后以「帧数不足」收场。
+% 也就是说「把 npts_max 抬到 1e6」是安全的，抬到 5e6 就必须同时把这个上限也抬起来
+% （实测传输约 5.8 MB/s，20 MB 约 3.4 s，仍在 acquire_block 的 8 s 超时内）。
 L = struct( ...
     'npts_min', 4096, 'npts_max', 100000, 'npts_default', 40000, ...
-    'n_cycle_min', 1, 'n_cycle_max', 10000, 'n_cycle_default', 400);
+    'n_cycle_min', 1, 'n_cycle_max', 10000, 'n_cycle_default', 400, ...
+    'wf_max_bytes', 2e6);
 end

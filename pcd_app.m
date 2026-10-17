@@ -28,7 +28,9 @@ if ~iscell(names)
 end
 for k = 1:numel(old)
     n = names{k};
-    if ischar(n) && (contains(n, 'PCD') || contains(n, 'PCD') || contains(n, 'UTSW_FindGrid'))
+    % 第三个是改名前的老窗口名（PFC）。以前这里把 'PCD' 写了两遍，
+    % 于是跑过旧版 PFC 的机器重复启动时旧窗口关不掉，会越叠越多。
+    if ischar(n) && (contains(n, 'PCD') || contains(n, 'PFC') || contains(n, 'UTSW_FindGrid'))
         % 用 close 而不是 delete：走 CloseRequestFcn，旧窗口里若还在跑采集
         % 会被中止、射频被关掉；delete 会绕过它，超声可能一直开着。
         try

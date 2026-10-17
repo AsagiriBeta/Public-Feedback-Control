@@ -142,6 +142,13 @@ end
 D0 = prefs_load();
 D = D0;
 fn = fieldnames(D);
+% 这些字段 0 本身是合法输入，不能按「必须 > 0」丢掉：
+%   target_db = 0（目标就是基线本身）、ic_limit_db = 0、
+%   mb_load_s = 0（这一段不装微泡）、cav_pct = 0。
+% 否则填 0 存不住，重启又静默变回旧值，界面和实际跑的数不一致。
+% freq_mhz / volt_mVpp / prf_hz / duration_s 不在表里：它们的 0 是非法输入，
+% 照旧不落盘，参数层会报错，不能在这里放行。
+zeroOk = {'target_db', 'ic_limit_db', 'mb_load_s', 'cav_pct'};
 for i = 1:numel(fn)
     k = fn{i};
     if ~isfield(S, k)
@@ -158,7 +165,7 @@ for i = 1:numel(fn)
         end
     end
     if isnumeric(v)
-        if isscalar(v) && isfinite(v) && v > 0
+        if isscalar(v) && isfinite(v) && (v > 0 || (v == 0 && any(strcmp(k, zeroOk))))
             D.(k) = double(v);
         end
     elseif ischar(v) || isstring(v)

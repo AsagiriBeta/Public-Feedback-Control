@@ -73,10 +73,25 @@ if isempty(T)
 end
 
 need_post = burst_s * margin;
-% 条件筛：预算内 + 采样率够 + 触后窗口装得下这一发
+% 单通道一次波形块能读回多少点（WORD = 2 字节/点）。深度档超了它，每帧读都会失败、
+% 帧被静默丢弃 —— 所以这里是硬上限，不是建议值。与 rigol_read_ieee_block_binary 同一个数。
+cap_bytes = 2e6;
+try
+    L = pcd_param_limits();
+    if isfield(L, 'wf_max_bytes') && isfinite(L.wf_max_bytes) && L.wf_max_bytes >= 16
+        cap_bytes = L.wf_max_bytes;
+    end
+catch
+end
+max_pts_by_read = floor(cap_bytes / 2);
+G.wf_max_bytes = cap_bytes;
+G.max_depth_pts = max_pts_by_read;
+
+% 条件筛：预算内 + 读得回来 + 采样率够 + 触后窗口装得下这一发
 keep = false(1, numel(T));
 for i = 1:numel(T)
     keep(i) = T(i).depth_pts <= npts_max ...
+        && T(i).depth_pts <= max_pts_by_read ...
         && T(i).depth_pts >= npts ...
         && T(i).fs >= G.fs_min * (1 - 1e-9) ...
         && T(i).post_s >= need_post;
@@ -84,7 +99,12 @@ end
 cand = T(keep);
 
 if isempty(cand)
-    G.reason = explain_failure(T, burst_s, need_post, G.fs_min, npts_max, margin);
+    G.reason = explain_failure(T, burst_s, need_post, G.fs_min, npts_max, margin, max_pts_by_read);
+    if npts_max > max_pts_by_read
+        G.reason = sprintf(['%s\n  另注意：传输预算 %.4g 点已经超过单通道一次能读回的上限 %d 点' ...
+            '（wf_max_bytes = %.4g 字节）。抬 npts 上限时要把 wf_max_bytes 一起抬，' ...
+            '否则深度档选上去了、波形却读不回来。'], G.reason, npts_max, max_pts_by_read, cap_bytes);
+    end
     return;
 end
 
@@ -122,32 +142,49 @@ if G.record_s > 4 * (burst_s + need_post)
 end
 end
 
-function s = explain_failure(T, burst_s, need_post, fs_min, npts_max, margin)
+function s = explain_failure(T, burst_s, need_post, fs_min, npts_max, margin, max_pts_by_read)
 %EXPLAIN_FAILURE 用实测数字说明卡在哪一关，并给出可执行的选项。
-% 不要只说「装不下」——用户需要知道是深度不够、还是采样率不够、还是两个都不够。
+% 不要只说「装不下」——用户需要知道是深度不够、还是采样率不够、还是读不回来。
+% 注意必须把「读回上限」也纳入筛选：否则会报出一档实际被滤掉的深度（例如 10M），
+% 说它「最好」，然后建议用户去提高 npts_max —— 提了也没用，因为卡在块读那一侧。
+if nargin < 7 || isempty(max_pts_by_read) || ~isfinite(max_pts_by_read)
+    max_pts_by_read = inf;
+end
 in_budget = [T.depth_pts] <= npts_max;
+readable  = [T.depth_pts] <= max_pts_by_read;
+usable    = in_budget & readable;
 dmax = max([T.depth_pts]);
 if isempty(dmax), dmax = NaN; end
-if any(in_budget)
-    best = T(in_budget);
-    [pmax, ip] = max([best.post_s]);
-    f_at = best(ip).fs;
-    % 预算内能做到的最长触后窗口，以及在那个窗口下的采样率
-    s = sprintf(['预算 %.4g 点内装不下这一发 %.4g ms（需触后窗口 ≥ %.4g ms）。' ...
-        '实测最好的一档是 %s @ %.4g µs/div：触后窗口 %.4g ms、fs %.4g MSa/s' ...
-        '（采样率下限 %.4g MSa/s）。'], ...
-        npts_max, burst_s * 1e3, need_post * 1e3, ...
-        best(ip).depth_tag, best(ip).div_s * 1e6, pmax * 1e3, f_at / 1e6, fs_min / 1e6);
-    if pmax < need_post
-        s = [s sprintf(['\n  → 这一关是窗口不够：需要更大的深度档（提高 pcd_param_limits.npts_max），' ...
-            '或缩短 n_cycle。'])]; %#ok<AGROW>
+
+if ~any(usable)
+    % 两端都被卡死：要分别说清是哪一侧
+    if ~any(readable)
+        s = sprintf(['实测最小深度档就超过单通道一次能读回的上限 %d 点' ...
+            '（wf_max_bytes = %.4g 字节）。'], max_pts_by_read, max_pts_by_read * 2);
+    elseif ~any(in_budget)
+        s = sprintf(['最小深度档就超过传输预算 %.4g 点（实测最大档 %g 点）。' ...
+            '请提高 pcd_param_limits.npts_max。'], npts_max, dmax);
     else
-        s = [s sprintf(['\n  → 这一关是采样率不够：窗口够但 fs 低于下限，' ...
-            '需要更大的深度档才能在这档采样率上再压一档。'])]; %#ok<AGROW>
+        s = sprintf('实测档位表里没有落在「预算 %.4g 点」且「可读回 %d 点」内的组合。', ...
+            npts_max, max_pts_by_read);
     end
+    return
+end
+
+best = T(usable);
+[pmax, ip] = max([best.post_s]);
+f_at = best(ip).fs;
+s = sprintf(['预算内且读得回来的档里装不下这一发 %.4g ms（需触后窗口 ≥ %.4g ms）。' ...
+    '实测最好的一档是 %s @ %.4g µs/div：触后窗口 %.4g ms、fs %.4g MSa/s' ...
+    '（采样率下限 %.4g MSa/s）。'], ...
+    burst_s * 1e3, need_post * 1e3, ...
+    best(ip).depth_tag, best(ip).div_s * 1e6, pmax * 1e3, f_at / 1e6, fs_min / 1e6);
+if pmax < need_post
+    s = [s sprintf(['\n  → 这一关是窗口不够：需要更大的深度档（提高 pcd_param_limits.npts_max），' ...
+        '或缩短 n_cycle。'])]; %#ok<AGROW>
 else
-    s = sprintf(['最小深度档就超过预算 %.4g 点（实测最大档 %g 点）。' ...
-        '请提高 pcd_param_limits.npts_max。'], npts_max, dmax);
+    s = [s sprintf(['\n  → 这一关是采样率不够：窗口够但 fs 低于下限，' ...
+        '需要更大的深度档才能在这档采样率上再压一档。'])]; %#ok<AGROW>
 end
 end
 

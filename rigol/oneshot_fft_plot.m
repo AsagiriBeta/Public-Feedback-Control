@@ -25,7 +25,14 @@ cleanup = onCleanup(@() local_off(fgen, scope)); %#ok<NASGU>
 
 rigol_dg2052_apply_burst(fgen, cfg.awg_channel, freq_mhz, volt_mV, 0, n_cycle, 1/prf_hz);
 rigol_dg2052_output_set(fgen, true);
-[chPcd, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, npts, cfg.scope_pcd_channel);
+% 分析长度要用这一发本身的点数（几何给的 acq_n），不是 npts。
+% 这个脚本发的是 100 周期猝发（1.5 MHz 下约 6.7k 点），按 npts=40000 裁会把
+% 大段空档包进 FFT，SC/IC 被占空比稀释，与界面单次采集的数据不可比。
+acq_n = npts;
+if isfield(info, 'geom_ok') && info.geom_ok && isfinite(info.acq_n) && info.acq_n >= 256
+    acq_n = round(info.acq_n);
+end
+[chPcd, dt_ns, realFs, chTx] = rigol_dho814_acquire_block(scope, acq_n, cfg.scope_pcd_channel);
 rigol_dg2052_output_set(fgen, false);
 
 [F, ~, db] = pcd_spectrum(chTx, realFs);

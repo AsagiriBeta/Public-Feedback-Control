@@ -9,7 +9,7 @@ function varargout = pcd_update(cmd, varargin)
 % ── 更新源 ──────────────────────────────────────────────────────────
 % 对用户完全透明：源写死在 default_source() 里，点「检查更新」直接用，
 % 界面上没有也不需要任何配置入口：
-%     https://raw.githubusercontent.com/jiaxuanli2504-cell/Passive-Cavitation-Detection/main/update.json
+%     https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 %
 % 只有运维需要换源时（内网服务器、局域网共享、隔离网无法回源）才用得上
 % <工作根>/pcd_update.ini 覆盖，界面上不暴露、出错时也不提示它：
@@ -70,7 +70,11 @@ function s = default_source()
 %DEFAULT_SOURCE 出厂默认更新源 —— 本项目在 GitHub 上的发布仓库。
 % 换仓库、换镜像只改这一处。想改用内网服务器 / 局域网共享，就在
 % <工作根>/pcd_update.ini 里写 source=… 覆盖（和 rigol_config.ini 一个套路）。
-s = 'https://raw.githubusercontent.com/jiaxuanli2504-cell/Passive-Cavitation-Detection/main/update.json';
+% 必须是**本仓库**（AsagiriBeta/Public-Feedback-Control），不是 fork。
+% 这里以前抄的是 fork 的地址（jiaxuanli2504-cell/Passive-Cavitation-Detection），
+% 而 pcd_release 发清单时 URL 是按 git remote 算的 —— 于是「发版正常、目标机永远
+% 读不到本项目的清单」，点「检查更新」会去拉另一套程序或直接 404。
+s = 'https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json';
 end
 
 function s = read_source()

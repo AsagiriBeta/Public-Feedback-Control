@@ -75,6 +75,8 @@ try
         clipped = rigol_dho814_clipped(chTx, scTx) || rigol_dho814_clipped(chPcd, scPcd);
         % 每发按峰值预留 4× 余量（K_DIV=1.0）。削顶会造假谐波，入库会把谱带歪：
         % 贴轨帧不写入 datamat，扩量程后重采，连续最多 3 次。
+        scTx0 = scTx;    % 记下仪器**当前真正在用**的量程，供下面的 8% 滞后比较
+        scPcd0 = scPcd;
         K_DIV = 1.0;
         if pkTx > 1e-4
             scTx = min(1.0, max(0.005, pkTx / K_DIV));
@@ -87,10 +89,22 @@ try
             scPcd = min(1.0, 1.5 * scPcd);
             n_clip = n_clip + 1;
         end
-        writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
-        writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
-        % 量程变了，波形几何缓存里的 YINCrement/YORigin/YREFerence 必须重查
-        rigol_dho814_wf_geom('stale');
+        % 与 set_ranges 同一套 8% 滞后：每帧无条件写两路量程、又无条件让几何缓存失效，
+        % 会把缓存带来的帧率收益在调试路径上原样还回去（实测每帧多付约 0.35 s）。
+        % 没写就退回旧值，保证 scTx/scPcd 始终等于仪器真正在用的量程 ——
+        % 上面第 75 行的削顶判定就是拿它们当满量程的。
+        if abs(scTx - scTx0) / max(scTx0, 1e-6) > 0.08
+            writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
+            rigol_dho814_wf_geom('stale');
+        else
+            scTx = scTx0;
+        end
+        if abs(scPcd - scPcd0) / max(scPcd0, 1e-6) > 0.08
+            writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+            rigol_dho814_wf_geom('stale');
+        else
+            scPcd = scPcd0;
+        end
         if clipped
             if clip_retry < 3
                 clip_retry = clip_retry + 1;

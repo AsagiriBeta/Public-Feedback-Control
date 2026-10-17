@@ -60,7 +60,9 @@ BYTE 只取低 8 位，等于白扔 24 dB 动态范围。实测某轮数据里 I
 实测那一轮 92 帧里有 **26 帧（28%）** 峰值贴在竖直量程上限，其中 3f 电平最高的一帧
 比中位帧高约 45 dB。不剔除的话，闭环会把 3f 的假性飙升当成「空化增强」去追目标值。
 
-判定在 `rigol_dho814_clipped.m`：峰值贴到满量程 98% 即判削顶，满量程 =
+判定在 `rigol_dho814_clipped.m`：峰值贴到满量程 **90%** 即判削顶（旧版是 98%，
+软削顶「平顶但峰值略低于满格」会漏过去，已改；`tests/pcd_selftest_acquisition.m`
+自检也按 90% 写），满量程 =
 `scope_vdiv`/2 × SCALe（波形以 0 V 居中）。**不要**改用波峰因数判：实测统一到
 「猝发段」口径后，削顶帧 1.13–2.29、其余帧 1.51–5.19，两段区间重叠、分不开；
 满量程是硬边界，才分得开。
@@ -328,8 +330,12 @@ pcd_build_exe('noinstaller')   % 只编译 exe
 **默认源已经写死在程序里**（`pcd_update.m` 的 `default_source()`），指向本仓库：
 
 ```
-https://raw.githubusercontent.com/AsagiriBeta/Passive-Cavitation-Detection/main/update.json
+https://raw.githubusercontent.com/AsagiriBeta/Public-Feedback-Control/main/update.json
 ```
+
+> 这一段必须与 `git remote -v` 一致。曾经写成 fork 的地址
+> （`jiaxuanli2504-cell/Passive-Cavitation-Detection`）而 `pcd_release` 是按
+> remote 算清单 URL 的，于是「发版正常、目标机永远读不到」。
 
 所以目标机**装上就能直接点「检查更新」，不用先配一遍**。
 
@@ -370,7 +376,7 @@ source=none                                    # 关闭更新检查
 ```json
 {
   "version": "0.2.0",
-  "url": "https://github.com/AsagiriBeta/Passive-Cavitation-Detection/releases/download/v0.2.0/PCD_Installer_v0.2.0.exe",
+  "url": "https://github.com/AsagiriBeta/Public-Feedback-Control/releases/download/v0.2.0/PCD_Installer_v0.2.0.exe",
   "notes": "新增仪器自动扫描；修复 XXX"
 }
 ```

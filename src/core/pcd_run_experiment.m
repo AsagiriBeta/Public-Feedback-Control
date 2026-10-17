@@ -842,10 +842,17 @@ end
 if abs(scTx - scTx0) / max(scTx0, 1e-6) > 0.08
     writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
     rigol_dho814_wf_geom('stale');
+else
+    % 没写就退回旧值。否则这个变量会越跑越偏：下一帧的削顶判定
+    % （rigol_dho814_clipped 用 scTx 当满量程）和 next_scale 都会按一个
+    % 仪器并未使用的量程算，边界帧可能被误判成削顶/漏判。
+    scTx = scTx0;
 end
 if abs(scPcd - scPcd0) / max(scPcd0, 1e-6) > 0.08
     writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
     rigol_dho814_wf_geom('stale');
+else
+    scPcd = scPcd0;
 end
 end
 

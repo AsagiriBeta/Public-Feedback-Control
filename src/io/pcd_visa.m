@@ -298,7 +298,11 @@ end
 for k = 1:numel(allDev)
     try
         rn = string(allDev(k).ResourceName);
-        if contains(rn, string(addr)) || contains(string(addr), rn)
+        % 必须用 rigol_visa_same 归一化再比：`…::0::INSTR` 与 `…::INSTR` 两种写法
+        % 互相都不是子串，裸 contains 永远匹配不上。visa_candidates 专门生成了两种
+        % 写法，这里不归一化就白生成了 —— 结果是已开着的连接被再开一份（旧句柄泄漏）
+        % 或报「无法打开」，尽管连接其实是好的。
+        if strcmpi(char(rn), char(string(addr))) || rigol_visa_same(rn, addr)
             dev = allDev(k);
             return;
         end
