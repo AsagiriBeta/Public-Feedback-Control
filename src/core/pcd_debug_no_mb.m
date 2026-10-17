@@ -89,6 +89,8 @@ try
         end
         writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
         writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+        % 量程变了，波形几何缓存里的 YINCrement/YORigin/YREFerence 必须重查
+        rigol_dho814_wf_geom('stale');
         if clipped
             if clip_retry < 3
                 clip_retry = clip_retry + 1;

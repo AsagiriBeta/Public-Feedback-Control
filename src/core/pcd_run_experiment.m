@@ -17,10 +17,6 @@ pcd_abort = false;
 token = pcd_visa('token');
 
 mode = lower(char(mode));
-lead_cfg = 3e-3;
-if isfield(cfg, 'scope_lead_s') && isnumeric(cfg.scope_lead_s) && isfinite(cfg.scope_lead_s) && cfg.scope_lead_s >= 0
-    lead_cfg = double(cfg.scope_lead_s);
-end
 L = pcd_scope_labels();
 if L.manual && any(strcmp(mode, {'during', 'feedback'}))
     error('pcd:awg:manual', ...
@@ -129,7 +125,6 @@ PKraw = [];   % 2f 窗内 |Y| 峰值（存档）
 Flrec = [];   % 参考底 |Y|
 peaks_ch1 = [];
 harm_db = [];
-lead_max = 0;   % 实测「记录开头到这一发起点」的最长空档，用来校准 scope_lead_s
 pulse = 0;
 save_path = '';
 n_good = 0;
@@ -245,7 +240,6 @@ result = save_now();
         end
         ui.status(msg);
         fprintf('%s\n', msg);
-        report_lead(lead_max, lead_cfg);
     end
 
     function S = pack_save()
@@ -405,14 +399,11 @@ result = save_now();
                         label, n_good - n0, left));
                 end
             end
-            [chPcd, ~, realFs, chTx, okTx, leadFrame] = rigol_dho814_acquire_block( ...
+            [chPcd, ~, realFs, chTx, okTx, ~] = rigol_dho814_acquire_block( ...
                 scope, n_req, cfg.scope_pcd_channel, acq_mode, timeout_s, ...
                 p.period_s + 0.08, burst_s);
             if ~pcd_visa('alive', token)
                 break;
-            end
-            if isfinite(leadFrame)
-                lead_max = max(lead_max, leadFrame);
             end
             if ~frame_ok(chPcd, chTx, okTx, volt)
                 n_miss = n_miss + 1;
@@ -846,11 +837,15 @@ if rigol_dho814_clipped(chPcd, scPcd0)
     scPcd = min(10, 1.5 * scPcd);
 end
 % 量程几乎没变就不要每发写两次 :CHANnel:SCALe（USB 往返比 FFT 还慢）。
+% 真写了就必须让波形几何缓存失效：YINCrement/YORigin/YREFerence 随量程变，
+% 漏掉这一步，之后每帧的电压换算都是按旧量程算的（数值看着正常，但幅值全错）。
 if abs(scTx - scTx0) / max(scTx0, 1e-6) > 0.08
     writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_tx_channel, scTx));
+    rigol_dho814_wf_geom('stale');
 end
 if abs(scPcd - scPcd0) / max(scPcd0, 1e-6) > 0.08
     writeline(scope, sprintf(':CHANnel%d:SCALe %.6g', cfg.scope_pcd_channel, scPcd));
+    rigol_dho814_wf_geom('stale');
 end
 end
 
@@ -981,23 +976,6 @@ if ~any(m)
 else
     dbp = max(db(m));
 end
-end
-
-function report_lead(lead_max, lead_cfg)
-%REPORT_LEAD 把实测的「记录开头到这一发起点」空档报出来，用来校准 scope_lead_s。
-%
-% 这个数直接决定采样率：rigol_dho814_capture_geometry 要按它给记录留余量，
-% 留得越多、装下这一发需要的点数越多、fs 越低。默认 3e-3 是照注释里「1–3 ms」
-% 的实测上界保守取的；实测值更小就调小 rigol_config.ini 里的 scope_lead_s，fs 会回升。
-% 不报出来这个数就只能一直靠猜，而它一个数量级的差别能决定 6.6 ms 的窗装不装得下。
-if ~isfinite(lead_max) || lead_max <= 0
-    return
-end
-fprintf(['实测前置空档最长 %.3f ms（记录开头到这一发起点）。\n' ...
-    '  当前 scope_lead_s = %.3f ms。若实测明显更小，把它改小可提高采样率：' ...
-    'rigol_config.ini 里 scope_lead_s=%.6g，或在 MATLAB 里 ' ...
-    'cfg = rigol_instr_config(); cfg.scope_lead_s = %.6g; rigol_instr_config(''save'', cfg);\n'], ...
-    lead_max * 1e3, lead_cfg * 1e3, max(1.2 * lead_max, 0.2e-3), max(1.2 * lead_max, 0.2e-3));
 end
 
 function t = trig_from_mVpp(mV)

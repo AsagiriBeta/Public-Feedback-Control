@@ -28,15 +28,19 @@ writeline(dev, sprintf(':WAVeform:SOURce %s', chan));
 writeline(dev, sprintf(':WAVeform:MODE %s', wavemode));
 writeline(dev, sprintf(':WAVeform:FORMat %s', FMT));
 
-nact = str2double(rigol_visa_query(dev, ':WAVeform:POINts?'));
+% 几何走缓存：POINts/XINCrement/XORigin 一轮内定死，Y 三项只在这个通道换过量程后才重查。
+% 实测 :WAVeform:* 查询约 31–93 ms/条，每帧两路各 6 条就是几百毫秒 —— 缓存掉这些查询
+% 是整帧从 ~0.73 s 降到 ~0.17 s 的主要来源。换量程处必须调用 wf_geom('stale')。
+G = rigol_dho814_wf_geom('get', dev, ch);
+nact   = G.poins;
+yinc   = G.yinc;
+yor    = G.yor;
+yref   = G.yref;
+xinc   = G.xinc;
+xorigin = G.xorigin;
 if ~(isfinite(nact) && nact >= 256)
     error('rigol:dho814:npts', 'CH%d 缓冲只有 %g 点，跳过本帧', ch, nact);
 end
-yinc = str2double(rigol_visa_query(dev, ':WAVeform:YINCrement?'));
-yor = str2double(rigol_visa_query(dev, ':WAVeform:YORigin?'));
-yref = str2double(rigol_visa_query(dev, ':WAVeform:YREFerence?'));
-xinc = str2double(rigol_visa_query(dev, ':WAVeform:XINCrement?'));
-xorigin = str2double(rigol_visa_query(dev, ':WAVeform:XORigin?'));
 
 if ~(isfinite(yinc) && yinc ~= 0)
     error('rigol:dho814:yinc', 'CH%d YINCrement 无效（%.4g）。通道可能未打开或未采到波形。', ch, yinc);

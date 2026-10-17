@@ -85,13 +85,6 @@ cfg.scope_vdiv = 8;                % 竖直方向格数：波形以 0 V 居中 -
                                    % 削顶判定（rigol_dho814_clipped）要用它，别乱改
 
 cfg.harmonic_bandwidth_hz = 20e3;  % Chien 2022：SC/IC 均为 ±20 kHz
-
-% 采集窗里「猝发之前」要留多长空档 (s)。这台机器的 XORigin 会落在真正跳变前
-% 1–3 ms（见 rigol_dho814_setup 里的实测记录），记录不预留这段就会把猝发尾部切掉。
-% rigol_dho814_capture_geometry 用它定时基刻度，所以这个值直接决定采样率：
-% 留得越多，装下这一发需要的点数越多，fs 越低。默认取实测上界 3 ms 保守起步；
-% 跑一轮后看日志里的「实测前置空档」，按实测值调小，fs 会立刻回升。
-cfg.scope_lead_s = 3e-3;
 end
 
 function f = cfg_file()
@@ -106,7 +99,7 @@ if ~isfile(f)
 end
 % 只接受白名单键，避免误改内部字段
 numKeys = {'scope_tx_channel', 'scope_pcd_channel', 'scope_trig_channel', 'awg_channel', 'acquire_timeout_s', ...
-    'harmonic_bandwidth_hz', 'scope_vdiv', 'scope_lead_s'};
+    'harmonic_bandwidth_hz', 'scope_vdiv'};
 strKeys = {'scope_visa', 'awg_visa', 'awg_mode'};
 try
     lines = splitlines(fileread(f));
@@ -159,11 +152,10 @@ txt = sprintf([ ...
     'awg_channel=%g\n' ...
     'acquire_timeout_s=%g\n' ...
     'harmonic_bandwidth_hz=%g\n' ...
-    'scope_vdiv=%g\n' ...
-    'scope_lead_s=%.12g\n'], ...
+    'scope_vdiv=%g\n'], ...
     char(cfg.scope_visa), char(cfg.awg_visa), awg_mode_of(cfg), ...
     cfg.scope_tx_channel, cfg.scope_pcd_channel, cfg.scope_trig_channel, cfg.awg_channel, ...
-    cfg.acquire_timeout_s, cfg.harmonic_bandwidth_hz, cfg.scope_vdiv, cfg.scope_lead_s);
+    cfg.acquire_timeout_s, cfg.harmonic_bandwidth_hz, cfg.scope_vdiv);
 fid = fopen(f, 'w');
 if fid < 0
     error('rigol:config:write', '无法写入配置文件：%s', f);
