@@ -50,7 +50,12 @@ catch
     npts_max = 1e5;
 end
 
-if isfinite(burst_s) && burst_s > 0
+% 必须先判 isempty：没有 burst_s 的调用（CW 调试 / 单次看波形）里它是 []，
+% 而 isfinite([]) 返回的是空数组不是 false，`[] && ...` 会直接抛
+% 「短路 AND 的操作数必须可转换为逻辑标量」——整条调试路径一进来就崩。
+% || 是短路的，所以前面那条兜底 (`nargin < 7 || isempty(burst_s) || …`) 没这个问题，
+% 这里用的是 &&，顺序反了就炸。
+if ~isempty(burst_s) && isfinite(burst_s) && burst_s > 0
     geom = plan_by_probe(dev, burst_s, f0_hz, targetFs, npts, npts_max);
     if ~geom.ok
         error('rigol:dho814:geometry', '%s', geom.reason);
